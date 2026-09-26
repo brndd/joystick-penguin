@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
 #include "joystick_penguin/config.hpp"
 
 #include <linux/input-event-codes.h>

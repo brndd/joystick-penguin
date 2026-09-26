@@ -17,7 +17,5 @@
 - Add deterministic tests for mapping semantics and cleanup. Use an injectable
   clock for timers; do not make tests depend on wall-clock sleeps or real input
   hardware. Run the CMake build and CTest after relevant changes.
-- License new project source under GPL-3.0-or-later. Preserve notices and
-  attribution if incorporating code from another project.
 
 See [SPEC.md](SPEC.md) for the required behavior and delivery sequence.
