@@ -1,0 +1,24 @@
+# Numeric button values are Linux evdev codes (BTN_SOUTH=304, BTN_EAST=305).
+version: 1
+devices:
+  physical:
+    kind: evdev
+    path: /dev/input/by-id/example-event-joystick
+    grab: true
+  virtual:
+    kind: uinput
+    preset: joystick
+modes:
+  initial: default
+  names: [default, alternate]
+modifiers:
+  shift:
+    input: {device: physical, button: 307}
+bindings:
+  - input: {device: physical, button: 304}
+    modes: [default, alternate]
+    action: {type: button, device: virtual, button: 305}
+  - input: {device: physical, button: 304}
+    modes: [default, alternate]
+    modifiers: [shift]
+    action: {type: button, device: virtual, button: 307}
