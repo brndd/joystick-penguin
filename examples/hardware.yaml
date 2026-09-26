@@ -1,0 +1,15 @@
+# Replace the path and button code with values from your controller (evtest).
+version: 1
+devices:
+  physical:
+    kind: evdev
+    path: /dev/input/by-id/example-event-joystick
+    grab: true
+  virtual:
+    kind: uinput
+    preset: joystick
+modes: {initial: default, names: [default]}
+bindings:
+  - input: {device: physical, button: 288} # BTN_TRIGGER
+    modes: [default]
+    action: {type: button, device: virtual, button: 288}

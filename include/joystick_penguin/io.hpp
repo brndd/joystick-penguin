@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <expected>
 #include <string>
 #include <vector>
 
@@ -24,7 +25,7 @@ public:
     // Suitable for a single engine poll loop; the backend owns its descriptor.
     virtual int descriptor() const = 0;
     // Drain pending events in arrival order, without mutating mapping state.
-    virtual std::vector<InputEvent> read_events() = 0;
+    virtual std::expected<std::vector<InputEvent>, std::string> read_events() = 0;
 };
 
 enum class OutputEventKind { Button, AbsoluteAxis };
@@ -41,7 +42,7 @@ struct OutputEvent {
 class OutputSink {
 public:
     virtual ~OutputSink() = default;
-    virtual void write_frame(const std::vector<OutputEvent>& events) = 0;
+    virtual std::expected<void, std::string> write_frame(const std::vector<OutputEvent>& events) = 0;
 };
 
 // Timer decisions use an injected monotonic clock; implementations of input

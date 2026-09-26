@@ -1,37 +1,42 @@
 # Joystick Penguin
 
 Linux virtual joystick remapper inspired by Joystick Gremlin and Joyful.
-See [the project specification](AGENTS/SPEC.md) and
-[coding standards](AGENTS/CODING_STANDARDS.md) for implementation guidance.
+The current prototype maps physical buttons to virtual joystick buttons; other
+controls and mapping features are still in development.
 
-## Build and test
+## Build
 
-Requires a C++23 compiler and CMake 3.20+.
+Requires Linux, a C++23 compiler, CMake 3.20+, pkg-config, and libevdev
+development headers (Fedora: `libevdev-devel`). CMake downloads yaml-cpp on
+first configure.
 
 ```sh
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
-./build/joystick-penguin examples/basic.yaml
 ```
 
-The executable currently **validates** a profile and exits. It does not grab
-physical controllers or run mappings yet.
+## Try it
 
-## Profile conventions
+Edit [examples/hardware.yaml](examples/hardware.yaml): set `physical.path` to
+your joystick's `/dev/input/by-id/` or `/dev/input/by-path/` link and choose a
+button code it supports. `evtest <physical-link>` lists the codes; button
+numbers in profiles are **Linux event codes**, not button indices.
 
-Profiles are versioned YAML (`version: 1`). Devices are named and bindings
-reference those names, not creation order. `evdev` devices need a stable path
-(prefer `/dev/input/by-id/` or `/dev/input/by-path/`); `grab` defaults to true.
-`uinput` devices currently declare `preset: joystick`. Modes, modifiers, and
-bindings use the layout in [examples/basic.yaml](examples/basic.yaml).
+```sh
+./build/joystick-penguin examples/hardware.yaml
+```
 
-**Numeric `button` and `axis` values are Linux input event codes**, not logical
-indices: for example `BTN_SOUTH` is 304 and `ABS_X` is 0. Only button output
-actions are accepted by the skeleton loader; the hardware and gesture engine
-milestones will add runtime capability checks and additional action types.
-Invalid references and ambiguous equally specific bindings fail loading.
+The program prints the virtual `/dev/input/eventN` path. Use
+`evtest <virtual-event-node>` in another terminal to see mapped presses and
+releases. Stop the remapper with Ctrl+C. You need read access to the physical
+device and virtual event node, and write access to `/dev/uinput`. If a grab
+fails, close any other remapper using that physical device.
 
-The input backend, frame-based output sink, and injectable monotonic clock are
-declared in `include/joystick_penguin/io.hpp`. The engine will use these typed
-interfaces in a serialized event loop.
+Use `./build/joystick-penguin --check <profile.yaml>` to validate a profile
+without opening devices. [examples/basic.yaml](examples/basic.yaml) illustrates
+planned modifier bindings and currently works with `--check` only.
+
+See [NOTES.md](NOTES.md) for implementation details and current limitations,
+[the specification](AGENTS/SPEC.md) for planned features, and [LICENSE](LICENSE)
+for the GPL-3.0-or-later license.
