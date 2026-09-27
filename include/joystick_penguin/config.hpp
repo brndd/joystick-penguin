@@ -10,6 +10,7 @@
 namespace joystick_penguin {
 
 enum class DeviceKind { Evdev, Uinput };
+enum class VirtualBus { Virtual, Usb };
 
 struct AxisRange {
     int minimum;
@@ -23,9 +24,14 @@ struct Device {
     bool grab = true;    // Applies only to evdev devices.
     std::string preset;  // Applies only to uinput devices.
     std::map<int, AxisRange> axes = {}; // Virtual non-hat EV_ABS capabilities.
+    int vendor_id = 1; // Virtual USB-style identity; applies only to uinput.
+    int product_id = 1;
+    std::string virtual_name = ""; // Defaults to "JP " + the configured device name.
+    VirtualBus bus = VirtualBus::Virtual;
 };
 
-// Codes are Linux evdev event codes, not ordinal button numbers.
+// Typed input buttons use negative keys for one-based indices; positive keys
+// are explicit Linux EV_KEY codes. Axis and hat codes remain Linux EV_ABS.
 enum class ControlKind { Button, HatDirection, AbsoluteAxis };
 
 struct Control {

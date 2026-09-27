@@ -15,7 +15,7 @@ enum class InputEventKind { Button, AbsoluteAxis, AxisBaseline, FrameEnd, SyncLo
 struct InputEvent {
     std::string device;
     InputEventKind kind;
-    int code = 0;
+    int code = 0; // Indexed buttons use a private negative key after evdev normalization.
     int value = 0;
     int minimum = 0; // Physical EV_ABS range for axis events and baselines.
     int maximum = 0;

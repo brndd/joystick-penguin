@@ -1,12 +1,16 @@
 #include "joystick_penguin/output_frames.hpp"
+#include "joystick_penguin/joystick_preset.hpp"
 
 namespace joystick_penguin {
 
 OutputFrames::OutputFrames(OutputSink& sink, const Config& config) : sink_(sink) {
     for (const auto& [name, device] : config.devices)
-        if (device.kind == DeviceKind::Uinput)
+        if (device.kind == DeviceKind::Uinput) {
             for (const auto& [code, range] : device.axes)
                 neutral_.emplace(Key{name, OutputEventKind::AbsoluteAxis, code}, range.neutral);
+            for (const int code : joystick_hats())
+                neutral_.emplace(Key{name, OutputEventKind::AbsoluteAxis, code}, 0);
+        }
     auto hats = [this](const std::vector<Action>& actions) {
         for (const auto& action : actions)
             if (const auto* hat = std::get_if<HatAction>(&action))

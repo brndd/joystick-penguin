@@ -96,10 +96,16 @@ An axis update or modifier change may route the cached position after that.
 The YAML loader validates names, kinds, codes, ranges, references, unreachable
 self-modified bindings, and ambiguous binding precedence before returning a
 typed `Config`. A single `action` is shorthand for a nonempty `actions` list;
-both forms produce the same typed actions. Numeric `button` and
-`axis` values are Linux event codes (for example, `BTN_SOUTH` is 304 and
-`ABS_X` is 0), not logical button indices. See
+both forms produce the same typed actions. `button` is a one-based index;
+`button_code` is an explicit Linux EV_KEY code. `axis` and `hat` use Linux
+EV_ABS codes. Indexed physical buttons are resolved from capabilities at
+connect time and normalized before reaching the gesture engine. Reconnects
+with changed button layouts are rejected. The virtual joystick preset advertises
+all 79 button codes (288–303, 704–766), axes 0–7 and hats 16–23. See
 [AGENTS/CODING_STANDARDS.md](AGENTS/CODING_STANDARDS.md) for coding conventions.
+Code 767 is left out because the currently inspected Wine and SDL evdev paths
+skip `KEY_MAX`; the preset's eight axes also avoid Wine's six-axis gamepad
+remapping heuristic.
 
 ## Verification
 
@@ -142,10 +148,22 @@ their cleanup in a second virtual frame. At the deadline, hold actions
 activate while the button is held and clean up at release. A mode action in
 either branch persists after release. Device loss and shutdown cancel pending
 deadlines without triggering a tap. See [examples/modes.yaml](examples/modes.yaml).
-To try it with `evtest`, hold button 288, then hold button 292 past 200 ms:
-288 remains asserted until released, 295 asserts during the hold, and new
-presses of 288 use output 289. Moving physical axis 0 routes to virtual axis 1
-in the alternate mode. Tap button 292 to pulse 294 in two output frames; press
-293 to return to the default mode.
+To try it with `evtest`, hold physical button 1, then hold button 5 past 200 ms:
+virtual button 1 remains asserted until released, button 8 asserts during the
+hold, and new presses of 1 use output 2. Moving physical axis 0 routes to
+virtual axis 1 in the alternate mode. Tap button 5 to pulse button 7 in two
+output frames; press button 6 to return to the default mode.
 The remapper prints `Initial mode: default` on startup and logs persistent
 transitions such as `Mode changed: default -> alternate` when they occur.
+
+## Joyful Star Citizen profile
+
+`examples/star_citizen.yaml` ports the two VKB sticks in the Joyful
+`sc_profile`. Joyful's zero-based indices are incremented to the profile's
+one-based button numbers. The physical numbers resolve against each VKB's
+actual EV_KEY capabilities; the virtual outputs use our 79-button joystick
+preset. Joyful's momentary Modifier mode is the held left-button-5 layer over
+the three persistent modes. The profile retains the USB bus, device names,
+vendor and product IDs, but its virtual button ordinal layout is deliberately
+not identical to Joyful's. The source Joyful profile had already omitted Gremlin mouse
+acceleration and two macros; those omissions remain.

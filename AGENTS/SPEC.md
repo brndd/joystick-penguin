@@ -259,8 +259,10 @@ outputs from a single captured gesture, use a nonempty `actions: [{...}, {...}]`
 list instead. A binding must specify exactly one of `action` or `actions`.
 Axis input codes and virtual output axis codes use Linux `EV_ABS` numbers.
 Directional hat inputs identify the hat component and its sign, while hat
-outputs advertise `ABS_HAT*` axes with the ternary range. Non-hat virtual
-axis outputs declare a minimum, maximum, and neutral value, for example:
+outputs advertise `ABS_HAT*` axes with the ternary range. The joystick preset
+advertises 79 buttons (EV_KEY 288–303 and 704–766), axes 0–7 and four hats.
+Its default non-hat axis range is `-32768..32767` with neutral `0`; individual
+ranges may be overridden, for example:
 
 ```yaml
 devices:
@@ -272,6 +274,19 @@ devices:
       2: {min: 0, max: 255, neutral: 0}
 ```
 
+Uinput devices may also set `vendor_id` and `product_id` (16-bit integers,
+including `0x` hexadecimal notation) to distinguish virtual controllers;
+both default to `1`. Optional `name` overrides the default `JP <device name>`;
+`bus: usb` selects a USB virtual identity instead of the default `virtual`.
+The preset advertises all 79 buttons and all hats, including unmapped ones, so
+game-facing button numbers do not depend on which actions are configured.
+`button: 1` denotes the first virtual preset button in an action; on a physical
+input it denotes that device's first advertised joystick button. Indices are
+one-based; physical indices are resolved on connection in joystick order
+(codes 288–766 first, then 256–287). For unusual controls,
+`button_code: 704` selects a literal Linux EV_KEY code for an input or output.
+Physical indices that do not exist are reported when the controller connects.
+
 See `examples/controls.yaml` for complete physical hat and axis bindings.
 
 `{type: mode, mode: alternate}` selects a persistent mode, without naming an
@@ -280,10 +295,10 @@ enables `tap` and/or `hold`; each branch contains one `action` or a nonempty
 `actions` list. These replace the binding's ordinary `action`/`actions` fields:
 
 ```yaml
-- input: {device: controller_a, button: 288}
+- input: {device: controller_a, button: 1}
   modes: [default, alternate]
   threshold_ms: 200
-  tap: {action: {type: button, device: virtual_a, button: 290}}
+  tap: {action: {type: button, device: virtual_a, button: 3}}
   hold: {action: {type: mode, mode: alternate}}
 ```
 
@@ -291,8 +306,8 @@ See `examples/modes.yaml` for a runnable profile.
 
 The configuration loader must validate device references, modifier names,
 input and output capabilities, mode references, and ambiguous binding
-precedence before starting the engine. Document whether numeric button values
-are Linux event codes or logical indices.
+precedence before starting the engine. Input `button` indices are validated
+against actual device capabilities on connection.
 
 The engine should consume validated, typed objects rather than making
 YAML-specific decisions during event processing.

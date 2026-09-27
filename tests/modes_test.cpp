@@ -46,39 +46,39 @@ devices:
       1: {min: -100, max: 100, neutral: 0}
 modes: {initial: default, names: [default, alternate]}
 modifiers:
-  shift: {input: {device: b, button: 307}}
+  shift: {input: {device: b, button_code: 307}}
 bindings:
-  - input: {device: a, button: 304}
+  - input: {device: a, button_code: 304}
     modes: [default]
-    action: {type: button, device: v, button: 304}
-  - input: {device: a, button: 304}
+    action: {type: button, device: v, button_code: 304}
+  - input: {device: a, button_code: 304}
     modes: [alternate]
-    action: {type: button, device: v, button: 305}
+    action: {type: button, device: v, button_code: 305}
   - input: {device: a, axis: 0}
     modes: [default]
     action: {type: axis, device: v, axis: 0}
   - input: {device: a, axis: 0}
     modes: [alternate]
     action: {type: axis, device: v, axis: 1}
-  - input: {device: b, button: 308}
+  - input: {device: b, button_code: 308}
     modes: [default, alternate]
     threshold_ms: 200
-    tap: {action: {type: button, device: v, button: 310}}
+    tap: {action: {type: button, device: v, button_code: 310}}
     hold:
       actions:
-        - {type: button, device: v, button: 311}
+        - {type: button, device: v, button_code: 311}
         - {type: mode, mode: alternate}
-  - input: {device: b, button: 309}
+  - input: {device: b, button_code: 309}
     modes: [default, alternate]
     action: {type: mode, mode: default}
-  - input: {device: b, button: 314}
+  - input: {device: b, button_code: 314}
     modes: [default, alternate]
     action: {type: mode, mode: alternate}
-  - input: {device: b, button: 307}
+  - input: {device: b, button_code: 307}
     modes: [default, alternate]
     threshold_ms: 100
-    hold: {action: {type: button, device: v, button: 312}}
-  - input: {device: b, button: 313}
+    hold: {action: {type: button, device: v, button_code: 312}}
+  - input: {device: b, button_code: 313}
     modes: [default, alternate]
     threshold_ms: 100
     tap: {action: {type: mode, mode: default}}
@@ -115,22 +115,22 @@ void validation() {
     rejected(replace(profile, "threshold_ms: 200", "threshold_ms: 1.5"), "integer");
     rejected(replace(profile, "threshold_ms: 200", "threshold_ms: 200\n    action: {type: mode, mode: default}"),
              "cannot mix");
-    rejected(replace(profile, "    tap: {action: {type: button, device: v, button: 310}}\n"
-                      "    hold:\n      actions:\n        - {type: button, device: v, button: 311}\n"
+    rejected(replace(profile, "    tap: {action: {type: button, device: v, button_code: 310}}\n"
+                      "    hold:\n      actions:\n        - {type: button, device: v, button_code: 311}\n"
                       "        - {type: mode, mode: alternate}", ""), "requires tap or hold");
     rejected(replace(profile, "type: mode, mode: alternate", "type: mode, mode: missing"),
              "unknown mode");
-    rejected(replace(profile, "tap: {action: {type: button, device: v, button: 310}}",
+    rejected(replace(profile, "tap: {action: {type: button, device: v, button_code: 310}}",
                      "tap: {actions: []}"), "actions cannot be empty");
-    rejected(replace(profile, "tap: {action: {type: button, device: v, button: 310}}",
-                     "tap: {action: {type: button, device: v, button: 310}, extra: 1}"),
+    rejected(replace(profile, "tap: {action: {type: button, device: v, button_code: 310}}",
+                     "tap: {action: {type: button, device: v, button_code: 310}, extra: 1}"),
              "unknown key");
-    rejected(replace(profile, "tap: {action: {type: button, device: v, button: 310}}",
-                     "tap: {action: {type: button, device: missing, button: 310}}"),
+    rejected(replace(profile, "tap: {action: {type: button, device: v, button_code: 310}}",
+                     "tap: {action: {type: button, device: missing, button_code: 310}}"),
              "unknown or wrong-kind device");
-    rejected(replace(profile, "tap: {action: {type: button, device: v, button: 310}}",
-                     "tap: {actions: [{type: button, device: v, button: 310},"
-                     " {type: button, device: v, button: 310}]}"), "repeats output control");
+    rejected(replace(profile, "tap: {action: {type: button, device: v, button_code: 310}}",
+                     "tap: {actions: [{type: button, device: v, button_code: 310},"
+                     " {type: button, device: v, button_code: 310}]}"), "repeats output control");
     rejected(replace(profile, "  - input: {device: a, axis: 0}\n    modes: [default]",
                      "  - input: {device: a, axis: 0}\n    threshold_ms: 20\n    modes: [default]"),
              "tap/hold requires a button");

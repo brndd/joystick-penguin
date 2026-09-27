@@ -1,4 +1,4 @@
-# Numeric button values are Linux evdev codes (BTN_SOUTH=304, BTN_EAST=305).
+# One-based button numbers are device-relative on input and preset-relative on output.
 version: 1
 devices:
   physical:
@@ -13,12 +13,12 @@ modes:
   names: [default, alternate]
 modifiers:
   shift:
-    input: {device: physical, button: 307}
+    input: {device: physical, button: 4}
 bindings:
-  - input: {device: physical, button: 304}
+  - input: {device: physical, button: 1}
     modes: [default, alternate]
-    action: {type: button, device: virtual, button: 305}
-  - input: {device: physical, button: 304}
+    action: {type: button, device: virtual, button: 2}
+  - input: {device: physical, button: 1}
     modes: [default, alternate]
     modifiers: [shift]
-    action: {type: button, device: virtual, button: 307}
+    action: {type: button, device: virtual, button: 4}

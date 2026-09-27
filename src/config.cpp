@@ -1,4 +1,5 @@
 #include "joystick_penguin/config.hpp"
+#include "joystick_penguin/joystick_preset.hpp"
 
 #include <linux/input-event-codes.h>
 #include <yaml-cpp/yaml.h>
@@ -104,15 +105,19 @@ std::vector<std::string> names(const YAML::Node& node, const std::string& where)
 }
 
 Control input_control(const YAML::Node& node, const std::string& where) {
-    keys(node, where, {"device", "button", "axis", "hat"});
+    keys(node, where, {"device", "button", "button_code", "axis", "hat"});
     const auto button = node["button"];
+    const auto button_code = node["button_code"];
     const auto axis = node["axis"];
     const auto hat = node["hat"];
-    if (static_cast<int>(bool(button)) + int(bool(axis)) + int(bool(hat)) != 1)
-        throw ConfigError(where + " requires exactly one of 'button', 'axis', or 'hat'");
+    if (static_cast<int>(bool(button)) + int(bool(button_code)) + int(bool(axis)) + int(bool(hat)) != 1)
+        throw ConfigError(where + " requires exactly one of 'button', 'button_code', 'axis', or 'hat'");
     if (button)
         return {field(node, "device", where), ControlKind::Button,
-                number(button, where + ".button", BTN_MISC, KEY_MAX)};
+                button_index_key(number(button, where + ".button", 1, 255))};
+    if (button_code)
+        return {field(node, "device", where), ControlKind::Button,
+                number(button_code, where + ".button_code", BTN_MISC, KEY_MAX)};
     if (axis)
         return {field(node, "device", where), ControlKind::AbsoluteAxis,
                 ordinary_axis(axis, where + ".axis")};
@@ -161,12 +166,26 @@ Device parse_device(const YAML::Node& node, const std::string& where) {
         return device;
     }
     if (kind == "uinput") {
-        keys(node, where, {"kind", "preset", "axes"});
+        keys(node, where, {"kind", "preset", "axes", "name",
+                           "bus", "vendor_id", "product_id"});
         const auto preset = field(node, "preset", where);
         if (preset != "joystick") throw ConfigError(where + ".preset must be 'joystick'");
         Device device{DeviceKind::Uinput, "", true, preset};
+        device.axes = joystick_axes();
         if (const auto axes = node["axes"])
-            device.axes = parse_axes(axes, where + ".axes");
+            for (const auto& [code, range] : parse_axes(axes, where + ".axes"))
+                device.axes.insert_or_assign(code, range);
+        if (const auto name = node["name"])
+            device.virtual_name = text(name, where + ".name");
+        if (const auto bus = node["bus"]) {
+            const auto value = text(bus, where + ".bus");
+            if (value == "usb") device.bus = VirtualBus::Usb;
+            else if (value != "virtual") throw ConfigError(where + ".bus must be 'usb' or 'virtual'");
+        }
+        if (const auto vendor = node["vendor_id"])
+            device.vendor_id = number(vendor, where + ".vendor_id", 0, 0xffff);
+        if (const auto product = node["product_id"])
+            device.product_id = number(product, where + ".product_id", 0, 0xffff);
         return device;
     }
     throw ConfigError(where + ".kind is unsupported: '" + kind + "'");
@@ -209,9 +228,15 @@ std::map<std::string, Control> parse_modifiers(const YAML::Node& node) {
 Action parse_action(const YAML::Node& node, const std::string& where) {
     const auto type = field(node, "type", where);
     if (type == "button") {
-        keys(node, where, {"type", "device", "button"});
+        keys(node, where, {"type", "device", "button", "button_code"});
+        if (static_cast<bool>(node["button"]) == static_cast<bool>(node["button_code"]))
+            throw ConfigError(where + " requires exactly one of 'button' or 'button_code'");
+        if (const auto index = node["button"])
+            return ButtonAction{field(node, "device", where),
+                                joystick_button_code(number(index, where + ".button", 1,
+                                                            joystick_button_count))};
         return ButtonAction{field(node, "device", where),
-                            number(required(node, "button", where), where + ".button", BTN_MISC, KEY_MAX)};
+                            number(node["button_code"], where + ".button_code", BTN_MISC, KEY_MAX)};
     }
     if (type == "hat") {
         keys(node, where, {"type", "device", "axis", "direction"});

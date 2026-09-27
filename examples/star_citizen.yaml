@@ -1,0 +1,238 @@
+# Port of ~/build/joyful/sc_profile/ for two VKB Gladiator EVO sticks.
+# Buttons are one-based: Joyful's button index N becomes button N+1 here.
+# Physical button numbers follow each device's advertised joystick controls.
+# Both virtual devices advertise all 79 buttons from the joystick preset.
+# Joyful's temporary Modifier mode is a held layer on left button 5.
+# Names, mode lists and button remaps follow the Joyful profile.
+version: 1
+devices:
+  left:
+    kind: evdev
+    path: /dev/input/by-id/usb-VKB-Sim__C__Alex_Oz_2023_VKBsim_Gladiator_EVO_OT_L-event-joystick
+  right:
+    kind: evdev
+    path: /dev/input/by-id/usb-VKB-Sim__C__Alex_Oz_2023_VKBsim_Gladiator_EVO_R-event-joystick
+  left-vjoy:
+    kind: uinput
+    preset: joystick
+    name: joyful-left-vjoy
+    bus: usb
+    vendor_id: 0x4711
+    product_id: 0x0817
+  right-vjoy:
+    kind: uinput
+    preset: joystick
+    name: joyful-right-vjoy
+    bus: usb
+    vendor_id: 0x4711
+    product_id: 0x0818
+modes: {initial: SCM Mode, names: [SCM Mode, Auxiliary Mode, Nav Mode]}
+modifiers:
+  layer: {input: {device: left, button: 5}}
+bindings:
+  # Physical ABS_RX/RY mini-stick -> virtual ABS_Z/RX; twist -> ABS_RY.
+  # Linux ABS_X/Y/Z/RX/RY/RZ codes are 0/1/2/3/4/5.
+  - {input: {device: left, axis: 3}, modes: &base [SCM Mode, Auxiliary Mode, Nav Mode], action: {type: axis, device: left-vjoy, axis: 2}}
+  - {input: {device: left, axis: 4}, modes: *base, action: {type: axis, device: left-vjoy, axis: 3, invert: true}}
+  - {input: {device: left, axis: 5}, modes: *base, action: {type: axis, device: left-vjoy, axis: 4}}
+  - {input: {device: left, axis: 0}, modes: *base, action: {type: axis, device: left-vjoy, axis: 0}}
+  - {input: {device: left, axis: 1}, modes: *base, action: {type: axis, device: left-vjoy, axis: 1, invert: true}}
+  - {input: {device: left, axis: 2}, modes: *base, action: {type: axis, device: left-vjoy, axis: 5}}
+  - {input: {device: right, axis: 3}, modes: *base, action: {type: axis, device: right-vjoy, axis: 2}}
+  - {input: {device: right, axis: 4}, modes: *base, action: {type: axis, device: right-vjoy, axis: 3, invert: true}}
+  - {input: {device: right, axis: 5}, modes: *base, action: {type: axis, device: right-vjoy, axis: 4, invert: true}}
+  - {input: {device: right, axis: 0}, modes: *base, action: {type: axis, device: right-vjoy, axis: 0}}
+  - {input: {device: right, axis: 1}, modes: *base, action: {type: axis, device: right-vjoy, axis: 1}}
+  - {input: {device: right, axis: 2}, modes: *base, action: {type: axis, device: right-vjoy, axis: 5}}
+
+  # Left trigger, A2, B1; the layer button itself has no virtual output.
+  - {input: {device: left, button: 1}, modes: *base, action: {type: button, device: left-vjoy, button: 1}}
+  - {input: {device: left, button: 1}, modes: *base, modifiers: &layer [layer], action: {type: button, device: left-vjoy, button: 31}}
+  - {input: {device: left, button: 2}, modes: *base, action: {type: button, device: left-vjoy, button: 2}}
+  - {input: {device: left, button: 2}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 32}}
+  - {input: {device: left, button: 3}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 33}}
+  # L-A2: tap button 3; hold selects a persistent mode and asserts remapped buttons.
+  - input: {device: left, button: 3}
+    modes: [SCM Mode]
+    threshold_ms: 500
+    tap: {action: {type: button, device: left-vjoy, button: 3}}
+    hold:
+      actions:
+        - {type: button, device: left-vjoy, button: 63}
+        - {type: mode, mode: Nav Mode}
+  - input: {device: left, button: 3}
+    modes: [Auxiliary Mode]
+    threshold_ms: 500
+    tap: {action: {type: button, device: left-vjoy, button: 3}}
+    hold:
+      actions:
+        - {type: button, device: left-vjoy, button: 61}
+        - {type: button, device: left-vjoy, button: 64}
+        - {type: mode, mode: SCM Mode}
+  - input: {device: left, button: 3}
+    modes: [Nav Mode]
+    threshold_ms: 500
+    tap: {action: {type: button, device: left-vjoy, button: 3}}
+    hold:
+      actions:
+        - {type: button, device: left-vjoy, button: 64}
+        - {type: mode, mode: SCM Mode}
+  - {input: {device: left, button: 4}, modes: *base, action: {type: button, device: left-vjoy, button: 4}}
+  - {input: {device: left, button: 4}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 34}}
+
+  # L-A3 directions/press; L-A4 directions/press.
+  - {input: {device: left, button: 6}, modes: *base, action: {type: button, device: left-vjoy, button: 11}}
+  - {input: {device: left, button: 6}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 41}}
+  - {input: {device: left, button: 7}, modes: *base, action: {type: button, device: left-vjoy, button: 12}}
+  - {input: {device: left, button: 7}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 42}}
+  - {input: {device: left, button: 8}, modes: *base, action: {type: button, device: left-vjoy, button: 13}}
+  - {input: {device: left, button: 8}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 43}}
+  - {input: {device: left, button: 9}, modes: *base, action: {type: button, device: left-vjoy, button: 14}}
+  - {input: {device: left, button: 9}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 44}}
+  - {input: {device: left, button: 10}, modes: *base, action: {type: button, device: left-vjoy, button: 15}}
+  - {input: {device: left, button: 10}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 45}}
+  - {input: {device: left, button: 11}, modes: *base, action: {type: button, device: left-vjoy, button: 6}}
+  - {input: {device: left, button: 11}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 36}}
+  - {input: {device: left, button: 12}, modes: *base, action: {type: button, device: left-vjoy, button: 7}}
+  - {input: {device: left, button: 12}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 37}}
+  - {input: {device: left, button: 13}, modes: *base, action: {type: button, device: left-vjoy, button: 8}}
+  - {input: {device: left, button: 13}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 38}}
+  - {input: {device: left, button: 14}, modes: *base, action: {type: button, device: left-vjoy, button: 9}}
+  - {input: {device: left, button: 14}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 39}}
+  - {input: {device: left, button: 15}, modes: *base, action: {type: button, device: left-vjoy, button: 10}}
+  - {input: {device: left, button: 15}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 40}}
+
+  # L-C1 and rapid trigger, encoder, switch, and F buttons.
+  - {input: {device: left, button: 16}, modes: *base, action: {type: button, device: left-vjoy, button: 21}}
+  - {input: {device: left, button: 16}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 51}}
+  - {input: {device: left, button: 17}, modes: *base, action: {type: button, device: left-vjoy, button: 22}}
+  - {input: {device: left, button: 17}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 52}}
+  - {input: {device: left, button: 18}, modes: *base, action: {type: button, device: left-vjoy, button: 23}}
+  - {input: {device: left, button: 18}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 53}}
+  - {input: {device: left, button: 19}, modes: *base, action: {type: button, device: left-vjoy, button: 24}}
+  - {input: {device: left, button: 19}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 54}}
+  - {input: {device: left, button: 20}, modes: *base, action: {type: button, device: left-vjoy, button: 25}}
+  - {input: {device: left, button: 20}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 55}}
+  - input: {device: left, button: 21}
+    modes: *base
+    threshold_ms: 500
+    tap: {action: {type: button, device: left-vjoy, button: 26}}
+  - {input: {device: left, button: 21}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 56}}
+  - {input: {device: left, button: 22}, modes: *base, action: {type: button, device: left-vjoy, button: 27}}
+  - {input: {device: left, button: 22}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 57}}
+  - {input: {device: left, button: 23}, modes: *base, action: {type: button, device: left-vjoy, button: 28}}
+  - {input: {device: left, button: 23}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 58}}
+  - {input: {device: left, button: 24}, modes: *base, action: {type: button, device: left-vjoy, button: 29}}
+  - {input: {device: left, button: 24}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 59}}
+  - {input: {device: left, button: 25}, modes: *base, action: {type: button, device: left-vjoy, button: 19}}
+  - {input: {device: left, button: 25}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 49}}
+  - {input: {device: left, button: 26}, modes: *base, action: {type: button, device: left-vjoy, button: 20}}
+  - {input: {device: left, button: 26}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 50}}
+  - {input: {device: left, button: 27}, modes: *base, action: {type: button, device: left-vjoy, button: 16}}
+  - {input: {device: left, button: 27}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 46}}
+  - {input: {device: left, button: 28}, modes: *base, action: {type: button, device: left-vjoy, button: 17}}
+  - {input: {device: left, button: 28}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 47}}
+  - {input: {device: left, button: 29}, modes: *base, action: {type: button, device: left-vjoy, button: 18}}
+  - {input: {device: left, button: 29}, modes: *base, modifiers: *layer, action: {type: button, device: left-vjoy, button: 48}}
+
+  # Right trigger, A2, B1, D1.
+  - {input: {device: right, button: 1}, modes: *base, action: {type: button, device: right-vjoy, button: 1}}
+  - {input: {device: right, button: 1}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 31}}
+  - {input: {device: right, button: 2}, modes: *base, action: {type: button, device: right-vjoy, button: 2}}
+  - {input: {device: right, button: 2}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 32}}
+  - {input: {device: right, button: 3}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 33}}
+  - input: {device: right, button: 3}
+    modes: [SCM Mode]
+    threshold_ms: 500
+    tap: {action: {type: button, device: right-vjoy, button: 3}}
+    hold:
+      actions:
+        - {type: button, device: right-vjoy, button: 62}
+        - {type: mode, mode: Auxiliary Mode}
+  - input: {device: right, button: 3}
+    modes: [Auxiliary Mode]
+    threshold_ms: 500
+    tap: {action: {type: button, device: right-vjoy, button: 3}}
+    hold: {action: {type: button, device: left-vjoy, button: 60}}
+  - input: {device: right, button: 3}
+    modes: [Nav Mode]
+    threshold_ms: 500
+    tap: {action: {type: button, device: right-vjoy, button: 3}}
+    hold:
+      actions:
+        - {type: button, device: left-vjoy, button: 61}
+        - {type: mode, mode: Auxiliary Mode}
+  - {input: {device: right, button: 4}, modes: *base, action: {type: button, device: right-vjoy, button: 4}}
+  - {input: {device: right, button: 4}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 34}}
+  - {input: {device: right, button: 5}, modes: *base, action: {type: button, device: right-vjoy, button: 5}}
+  - {input: {device: right, button: 5}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 35}}
+
+  # R-A3 and R-A4 directions/press.
+  - {input: {device: right, button: 6}, modes: *base, action: {type: button, device: right-vjoy, button: 11}}
+  - {input: {device: right, button: 6}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 41}}
+  - {input: {device: right, button: 7}, modes: *base, action: {type: button, device: right-vjoy, button: 12}}
+  - {input: {device: right, button: 7}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 42}}
+  - {input: {device: right, button: 8}, modes: *base, action: {type: button, device: right-vjoy, button: 13}}
+  - {input: {device: right, button: 8}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 43}}
+  - {input: {device: right, button: 9}, modes: *base, action: {type: button, device: right-vjoy, button: 14}}
+  - {input: {device: right, button: 9}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 44}}
+  - {input: {device: right, button: 10}, modes: *base, action: {type: button, device: right-vjoy, button: 15}}
+  - {input: {device: right, button: 10}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 45}}
+  - {input: {device: right, button: 11}, modes: *base, action: {type: button, device: right-vjoy, button: 6}}
+  - {input: {device: right, button: 11}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 36}}
+  - {input: {device: right, button: 12}, modes: *base, action: {type: button, device: right-vjoy, button: 7}}
+  - {input: {device: right, button: 12}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 37}}
+  - {input: {device: right, button: 13}, modes: *base, action: {type: button, device: right-vjoy, button: 8}}
+  - {input: {device: right, button: 13}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 38}}
+  - {input: {device: right, button: 14}, modes: *base, action: {type: button, device: right-vjoy, button: 9}}
+  - {input: {device: right, button: 14}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 39}}
+  - {input: {device: right, button: 15}, modes: *base, action: {type: button, device: right-vjoy, button: 10}}
+  - {input: {device: right, button: 15}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 40}}
+
+  # R-C1, rapid trigger, encoder, switch, and F buttons.
+  - {input: {device: right, button: 16}, modes: *base, action: {type: button, device: right-vjoy, button: 21}}
+  - {input: {device: right, button: 16}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 51}}
+  - {input: {device: right, button: 17}, modes: *base, action: {type: button, device: right-vjoy, button: 22}}
+  - {input: {device: right, button: 17}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 52}}
+  - {input: {device: right, button: 18}, modes: *base, action: {type: button, device: right-vjoy, button: 23}}
+  - {input: {device: right, button: 18}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 53}}
+  - {input: {device: right, button: 19}, modes: *base, action: {type: button, device: right-vjoy, button: 24}}
+  - {input: {device: right, button: 19}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 54}}
+  - {input: {device: right, button: 20}, modes: *base, action: {type: button, device: right-vjoy, button: 25}}
+  - {input: {device: right, button: 20}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 55}}
+  - {input: {device: right, button: 21}, modes: *base, action: {type: button, device: right-vjoy, button: 26}}
+  - {input: {device: right, button: 21}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 56}}
+  - {input: {device: right, button: 22}, modes: *base, action: {type: button, device: right-vjoy, button: 27}}
+  - {input: {device: right, button: 22}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 57}}
+  - {input: {device: right, button: 23}, modes: *base, action: {type: button, device: right-vjoy, button: 28}}
+  - {input: {device: right, button: 23}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 58}}
+  - {input: {device: right, button: 24}, modes: *base, action: {type: button, device: right-vjoy, button: 29}}
+  - {input: {device: right, button: 24}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 59}}
+  - {input: {device: right, button: 25}, modes: *base, action: {type: button, device: right-vjoy, button: 19}}
+  - {input: {device: right, button: 25}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 49}}
+  - {input: {device: right, button: 26}, modes: *base, action: {type: button, device: right-vjoy, button: 20}}
+  - {input: {device: right, button: 26}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 50}}
+  - {input: {device: right, button: 27}, modes: *base, action: {type: button, device: right-vjoy, button: 16}}
+  - {input: {device: right, button: 27}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 46}}
+  - {input: {device: right, button: 28}, modes: *base, action: {type: button, device: right-vjoy, button: 17}}
+  - {input: {device: right, button: 28}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 47}}
+  - {input: {device: right, button: 29}, modes: *base, action: {type: button, device: right-vjoy, button: 18}}
+  - {input: {device: right, button: 29}, modes: *base, modifiers: *layer, action: {type: button, device: right-vjoy, button: 48}}
+
+  # Joyful hat X/Y rules become separate captured gestures per direction.
+  - {input: {device: left, hat: {axis: 16, direction: -1}}, modes: *base, action: {type: hat, device: left-vjoy, axis: 16, direction: -1}}
+  - {input: {device: left, hat: {axis: 16, direction: 1}}, modes: *base, action: {type: hat, device: left-vjoy, axis: 16, direction: 1}}
+  - {input: {device: left, hat: {axis: 17, direction: -1}}, modes: *base, action: {type: hat, device: left-vjoy, axis: 17, direction: -1}}
+  - {input: {device: left, hat: {axis: 17, direction: 1}}, modes: *base, action: {type: hat, device: left-vjoy, axis: 17, direction: 1}}
+  - {input: {device: left, hat: {axis: 16, direction: -1}}, modes: *base, modifiers: *layer, action: {type: hat, device: left-vjoy, axis: 18, direction: -1}}
+  - {input: {device: left, hat: {axis: 16, direction: 1}}, modes: *base, modifiers: *layer, action: {type: hat, device: left-vjoy, axis: 18, direction: 1}}
+  - {input: {device: left, hat: {axis: 17, direction: -1}}, modes: *base, modifiers: *layer, action: {type: hat, device: left-vjoy, axis: 19, direction: -1}}
+  - {input: {device: left, hat: {axis: 17, direction: 1}}, modes: *base, modifiers: *layer, action: {type: hat, device: left-vjoy, axis: 19, direction: 1}}
+  - {input: {device: right, hat: {axis: 16, direction: -1}}, modes: *base, action: {type: hat, device: right-vjoy, axis: 16, direction: -1}}
+  - {input: {device: right, hat: {axis: 16, direction: 1}}, modes: *base, action: {type: hat, device: right-vjoy, axis: 16, direction: 1}}
+  - {input: {device: right, hat: {axis: 17, direction: -1}}, modes: *base, action: {type: hat, device: right-vjoy, axis: 17, direction: -1}}
+  - {input: {device: right, hat: {axis: 17, direction: 1}}, modes: *base, action: {type: hat, device: right-vjoy, axis: 17, direction: 1}}
+  - {input: {device: right, hat: {axis: 16, direction: -1}}, modes: *base, modifiers: *layer, action: {type: hat, device: right-vjoy, axis: 18, direction: -1}}
+  - {input: {device: right, hat: {axis: 16, direction: 1}}, modes: *base, modifiers: *layer, action: {type: hat, device: right-vjoy, axis: 18, direction: 1}}
+  - {input: {device: right, hat: {axis: 17, direction: -1}}, modes: *base, modifiers: *layer, action: {type: hat, device: right-vjoy, axis: 19, direction: -1}}
+  - {input: {device: right, hat: {axis: 17, direction: 1}}, modes: *base, modifiers: *layer, action: {type: hat, device: right-vjoy, axis: 19, direction: 1}}

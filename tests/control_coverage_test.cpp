@@ -44,7 +44,7 @@ devices:
   vh: {kind: uinput, preset: joystick}
 modes: {initial: default, names: [default]}
 modifiers:
-  shift: {input: {device: b, button: 307}}
+  shift: {input: {device: b, button_code: 307}}
 bindings:
   - input: {device: a, axis: 0}
     modes: [default]
@@ -69,14 +69,14 @@ bindings:
   - input: {device: b, hat: {axis: 16, direction: -1}}
     modes: [default]
     modifiers: [shift]
-    action: {type: button, device: vh, button: 304}
+    action: {type: button, device: vh, button_code: 304}
   - input: {device: b, hat: {axis: 17, direction: -1}}
     modes: [default]
     action: {type: hat, device: vh, axis: 17, direction: -1}
   - input: {device: b, hat: {axis: 17, direction: 1}}
     modes: [default]
     action: {type: hat, device: vh, axis: 17, direction: 1}
-  - input: {device: b, button: 308}
+  - input: {device: b, button_code: 308}
     modes: [default]
     action: {type: hat, device: vh, axis: 16, direction: -1}
 )yaml";

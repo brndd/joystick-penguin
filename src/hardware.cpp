@@ -2,6 +2,7 @@
 
 #include "joystick_penguin/gesture_engine.hpp"
 #include "joystick_penguin/io.hpp"
+#include "joystick_penguin/joystick_preset.hpp"
 #include "joystick_penguin/output_frames.hpp"
 
 #include <libevdev/libevdev-uinput.h>
@@ -80,9 +81,36 @@ public:
                                libevdev_get_uniq(dev_) ? libevdev_get_uniq(dev_) : ""};
         if (identity_ && *identity_ != current)
             return fail(path_ + " now points to a different device identity");
+        resolved_keys_.clear();
         for (const int code : codes_)
-            if (!libevdev_has_event_code(dev_, EV_KEY, code))
-                return fail(path_ + " lacks configured EV_KEY code " + std::to_string(code));
+            if (code > 0) {
+                if (!libevdev_has_event_code(dev_, EV_KEY, code))
+                    return fail(path_ + " lacks configured EV_KEY code " + std::to_string(code));
+                resolved_keys_.emplace(code, code);
+            }
+        // Match the joystick ordering used by SDL: joystick/gamepad codes
+        // first, then BTN_MISC codes below BTN_JOYSTICK. KEY_MAX is skipped by
+        // current SDL and Wine; it remains available via button_code.
+        int index = 0;
+        auto enumerate = [&](int first, int last) -> std::expected<void, std::string> {
+            for (int code = first; code < last; ++code) {
+                if (!libevdev_has_event_code(dev_, EV_KEY, code)) continue;
+                ++index;
+                if (!codes_.contains(button_index_key(index))) continue;
+                if (!resolved_keys_.emplace(code, button_index_key(index)).second)
+                    return std::unexpected(path_ + " button " + std::to_string(index) +
+                                           " conflicts with configured button_code " + std::to_string(code));
+            }
+            return {};
+        };
+        if (const auto result = enumerate(BTN_JOYSTICK, KEY_MAX); !result) return fail(result.error());
+        if (const auto result = enumerate(BTN_MISC, BTN_JOYSTICK); !result) return fail(result.error());
+        for (const int code : codes_)
+            if (code < 0 && !std::any_of(resolved_keys_.begin(), resolved_keys_.end(),
+                [code](const auto& entry) { return entry.second == code; }))
+                return fail(path_ + " has no joystick button " + std::to_string(-code));
+        if (original_keys_ && *original_keys_ != resolved_keys_)
+            return fail(path_ + " button layout changed since the first connection");
         for (const int code : axes_) {
             if (!libevdev_has_event_code(dev_, EV_ABS, code))
                 return fail(path_ + " lacks configured EV_ABS code " + std::to_string(code));
@@ -118,6 +146,7 @@ public:
             return fail(error_text(path_ + " initial sync", -rc));
         }
         suppress_held();
+        original_keys_ = resolved_keys_;
         identity_ = current;
         return {};
     }
@@ -151,12 +180,13 @@ public:
                 events.insert(events.end(), pending_frame_.begin(), pending_frame_.end());
                 pending_frame_.clear();
                 events.push_back({name_, InputEventKind::FrameEnd});
-            } else if (event.type == EV_KEY && codes_.contains(event.code)) {
+            } else if (event.type == EV_KEY && resolved_keys_.contains(event.code)) {
                 if (event.value == 0) {
                     suppressed_.erase(event.code);
-                    pending_frame_.push_back({name_, InputEventKind::Button, event.code, 0});
+                    pending_frame_.push_back({name_, InputEventKind::Button, resolved_keys_.at(event.code), 0});
                 } else if (!suppressed_.contains(event.code)) {
-                    pending_frame_.push_back({name_, InputEventKind::Button, event.code, event.value});
+                    pending_frame_.push_back({name_, InputEventKind::Button,
+                                              resolved_keys_.at(event.code), event.value});
                 }
             } else if (event.type == EV_ABS && axes_.contains(event.code)) {
                 const auto* info = libevdev_get_abs_info(dev_, event.code);
@@ -177,6 +207,7 @@ public:
         fd_ = -1;
         node_id_ = 0;
         suppressed_.clear();
+        resolved_keys_.clear();
         pending_frame_.clear();
     }
 
@@ -198,7 +229,7 @@ private:
 
     void suppress_held() {
         suppressed_.clear();
-        for (const int code : codes_)
+        for (const auto& [code, normalized] : resolved_keys_)
             if (libevdev_get_event_value(dev_, EV_KEY, code) == 1)
                 suppressed_.insert(code);
     }
@@ -206,6 +237,8 @@ private:
     std::string name_, path_;
     bool grab_;
     std::set<int> codes_;
+    std::map<int, int> resolved_keys_;
+    std::optional<std::map<int, int>> original_keys_;
     std::set<int> axes_;
     std::set<int> suppressed_;
     std::vector<InputEvent> pending_frame_;
@@ -225,19 +258,20 @@ public:
     std::expected<void, std::string> create(const Config& config) {
         for (const auto& [name, device] : config.devices) {
             if (device.kind != DeviceKind::Uinput) continue;
-            const std::string label = "JP " + name;
+            const std::string label = device.virtual_name.empty() ? "JP " + name : device.virtual_name;
             if (label.size() >= UINPUT_MAX_NAME_SIZE)
                 return std::unexpected("virtual device name is too long: " + name);
             std::unique_ptr<libevdev, decltype(&libevdev_free)> description(libevdev_new(), libevdev_free);
             if (!description) return std::unexpected("cannot allocate uinput device description");
             libevdev_set_name(description.get(), label.c_str());
-            libevdev_set_id_bustype(description.get(), BUS_VIRTUAL);
-            libevdev_set_id_vendor(description.get(), 0x1);
-            libevdev_set_id_product(description.get(), 0x1);
+            libevdev_set_id_bustype(description.get(),
+                                   device.bus == VirtualBus::Usb ? BUS_USB : BUS_VIRTUAL);
+            libevdev_set_id_vendor(description.get(), device.vendor_id);
+            libevdev_set_id_product(description.get(), device.product_id);
             libevdev_set_id_version(description.get(), 1);
-            if (const int rc = libevdev_enable_event_code(description.get(), EV_KEY, BTN_JOYSTICK, nullptr);
-                rc < 0) return std::unexpected(error_text(label + " capabilities", -rc));
-            for (const auto& [code, range] : device.axes) {
+            auto axes = joystick_axes();
+            for (const auto& [code, range] : device.axes) axes.insert_or_assign(code, range);
+            for (const auto& [code, range] : axes) {
                 input_absinfo info{};
                 info.value = range.neutral;
                 info.minimum = range.minimum;
@@ -245,32 +279,35 @@ public:
                 if (const int rc = libevdev_enable_event_code(description.get(), EV_ABS, code, &info);
                     rc < 0) return std::unexpected(error_text(label + " axis capabilities", -rc));
             }
-            std::set<int> hats;
-            auto advertise = [&](const std::vector<Action>& actions) -> std::expected<void, std::string> {
+            std::set<int> buttons;
+            for (int index = 1; index <= joystick_button_count; ++index)
+                buttons.insert(joystick_button_code(index));
+            std::set<int> hats = joystick_hats();
+            auto collect = [&](const std::vector<Action>& actions) {
                 for (const auto& action : actions) {
                     if (const auto* button = std::get_if<ButtonAction>(&action)) {
-                        if (button->device != name) continue;
-                        if (const int rc = libevdev_enable_event_code(description.get(), EV_KEY,
-                                                                       button->code, nullptr); rc < 0)
-                            return std::unexpected(error_text(label + " capabilities", -rc));
+                        if (button->device == name) buttons.insert(button->code);
                     } else if (const auto* hat = std::get_if<HatAction>(&action)) {
-                        if (hat->device != name || !hats.insert(hat->code).second) continue;
-                        input_absinfo info{};
-                        info.minimum = -1;
-                        info.maximum = 1;
-                        if (const int rc = libevdev_enable_event_code(description.get(), EV_ABS,
-                                                                       hat->code, &info); rc < 0)
-                            return std::unexpected(error_text(label + " hat capabilities", -rc));
+                        if (hat->device == name) hats.insert(hat->code);
                     }
                 }
-                return {};
             };
             for (const auto& binding : config.bindings) {
-                if (const auto result = advertise(binding.actions); !result) return result;
+                collect(binding.actions);
                 if (binding.tap_hold) {
-                    if (const auto result = advertise(binding.tap_hold->tap); !result) return result;
-                    if (const auto result = advertise(binding.tap_hold->hold); !result) return result;
+                    collect(binding.tap_hold->tap);
+                    collect(binding.tap_hold->hold);
                 }
+            }
+            for (const int code : buttons)
+                if (const int rc = libevdev_enable_event_code(description.get(), EV_KEY, code, nullptr);
+                    rc < 0) return std::unexpected(error_text(label + " button capabilities", -rc));
+            for (const int code : hats) {
+                input_absinfo info{};
+                info.minimum = -1;
+                info.maximum = 1;
+                if (const int rc = libevdev_enable_event_code(description.get(), EV_ABS, code, &info);
+                    rc < 0) return std::unexpected(error_text(label + " hat capabilities", -rc));
             }
             libevdev_uinput* output = nullptr;
             if (const int rc = libevdev_uinput_create_from_device(description.get(),
@@ -278,7 +315,7 @@ public:
                 return std::unexpected(error_text(label + " /dev/uinput", -rc));
             devices_.emplace(name, output);
             bool initialized = false;
-            for (const auto& [code, range] : device.axes) {
+            for (const auto& [code, range] : axes) {
                 if (const int rc = libevdev_uinput_write_event(output, EV_ABS, code, range.neutral);
                     rc < 0) return std::unexpected(error_text(label + " initial axis state", -rc));
                 initialized = true;

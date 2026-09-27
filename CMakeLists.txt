@@ -18,7 +18,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
 
 add_library(joystick_penguin_core src/config.cpp src/gesture_engine.cpp
-    src/hardware.cpp src/output_frames.cpp)
+    src/hardware.cpp src/joystick_preset.cpp src/output_frames.cpp)
 target_include_directories(joystick_penguin_core PUBLIC include)
 target_link_libraries(joystick_penguin_core PRIVATE yaml-cpp::yaml-cpp PkgConfig::LIBEVDEV)
 target_compile_options(joystick_penguin_core PRIVATE -Wall -Wextra -Wpedantic)

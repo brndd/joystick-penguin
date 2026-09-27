@@ -1,4 +1,4 @@
-# Replace the path and button code with values from your controller (evtest).
+# Replace the stable path; button 1 is the first advertised joystick button.
 version: 1
 devices:
   physical:
@@ -10,6 +10,6 @@ devices:
     preset: joystick
 modes: {initial: default, names: [default]}
 bindings:
-  - input: {device: physical, button: 288} # BTN_TRIGGER
+  - input: {device: physical, button: 1}
     modes: [default]
-    action: {type: button, device: virtual, button: 288}
+    action: {type: button, device: virtual, button: 1}

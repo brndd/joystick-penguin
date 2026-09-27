@@ -1,4 +1,5 @@
 #include "joystick_penguin/hardware.hpp"
+#include "joystick_penguin/joystick_preset.hpp"
 
 #include <libevdev/libevdev-uinput.h>
 #include <libevdev/libevdev.h>
@@ -6,6 +7,7 @@
 #include <fcntl.h>
 #include <linux/input.h>
 #include <poll.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -43,6 +45,8 @@ Device synthetic(const char* name) {
     libevdev_set_id_product(description.get(), 0x5678);
     check(libevdev_enable_event_code(description.get(), EV_KEY, BTN_TRIGGER, nullptr) == 0,
           "enabling synthetic button");
+    check(libevdev_enable_event_code(description.get(), EV_KEY, BTN_TRIGGER_HAPPY1, nullptr) == 0,
+          "enabling non-contiguous synthetic button");
     libevdev_uinput* raw = nullptr;
     const int rc = libevdev_uinput_create_from_device(description.get(),
                                                        LIBEVDEV_UINPUT_OPEN_MANAGED, &raw);
@@ -61,6 +65,13 @@ std::string node(Device& device) {
 void button(Device& device, int value) {
     check(libevdev_uinput_write_event(device.get(), EV_KEY, BTN_TRIGGER, value) == 0,
           "writing synthetic button");
+    check(libevdev_uinput_write_event(device.get(), EV_SYN, SYN_REPORT, 0) == 0,
+          "writing synthetic frame");
+}
+
+void extra_button(Device& device, int value) {
+    check(libevdev_uinput_write_event(device.get(), EV_KEY, BTN_TRIGGER_HAPPY1, value) == 0,
+          "writing synthetic non-contiguous button");
     check(libevdev_uinput_write_event(device.get(), EV_SYN, SYN_REPORT, 0) == 0,
           "writing synthetic frame");
 }
@@ -121,7 +132,7 @@ struct Session {
     }
 };
 
-bool next_button(int fd, int value, int milliseconds) {
+bool next_button(int fd, int value, int milliseconds, int code = BTN_TRIGGER) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
     while (std::chrono::steady_clock::now() < deadline) {
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -131,7 +142,7 @@ bool next_button(int fd, int value, int milliseconds) {
         input_event event{};
         const auto count = read(fd, &event, sizeof(event));
         if (count == sizeof(event) && event.type == EV_KEY &&
-            event.code == BTN_TRIGGER && event.value == value) return true;
+            event.code == code && event.value == value) return true;
         if (count < 0 && errno != EAGAIN) throw std::runtime_error("reading virtual output");
     }
     return false;
@@ -160,7 +171,9 @@ void run() {
     config.devices.emplace("b", joystick_penguin::Device{DeviceKind::Evdev, session.b, false, ""});
     config.devices.emplace("virtual", joystick_penguin::Device{DeviceKind::Uinput, "", true, "joystick"});
     config.bindings = {
-        {{"a", ControlKind::Button, BTN_TRIGGER}, {"default"}, {}, {ButtonAction{"virtual", BTN_TRIGGER}}},
+        {{"a", ControlKind::Button, -1}, {"default"}, {}, {ButtonAction{"virtual", BTN_TRIGGER}}},
+        {{"a", ControlKind::Button, button_index_key(2)}, {"default"}, {},
+         {ButtonAction{"virtual", joystick_button_code(79)}}},
         {{"b", ControlKind::Button, BTN_TRIGGER}, {"default"}, {}, {ButtonAction{"virtual", BTN_TRIGGER}}},
     };
 
@@ -195,8 +208,21 @@ void run() {
     const auto output_path = session.logs.substr(start, end - start);
     const int output_fd = open_reader(output_path);
 
+    unsigned long buttons[(KEY_CNT + sizeof(unsigned long) * 8 - 1) / (sizeof(unsigned long) * 8)]{};
+    check(ioctl(output_fd, EVIOCGBIT(EV_KEY, sizeof(buttons)), buttons) >= 0 &&
+          (buttons[766 / (sizeof(unsigned long) * 8)] &
+           (1UL << (766 % (sizeof(unsigned long) * 8)))) != 0 &&
+          (buttons[767 / (sizeof(unsigned long) * 8)] &
+           (1UL << (767 % (sizeof(unsigned long) * 8)))) == 0,
+          "joystick preset advertises button 79 but not Wine-invisible KEY_MAX");
+
     button(input_a, 1);
     check(next_button(output_fd, 1, 2000), "a presses the virtual button");
+    extra_button(input_a, 1);
+    check(next_button(output_fd, 1, 2000, joystick_button_code(79)),
+          "second indexed physical button resolves across EV_KEY gap to button 79");
+    extra_button(input_a, 0);
+    check(next_button(output_fd, 0, 2000, joystick_button_code(79)), "indexed button releases");
     check(!next_button(observer_a, 1, 150), "grab suppresses other evdev readers");
     button(input_b, 1);
     check(next_button(observer_b, 1, 1000), "grab:false permits shared evdev input");
