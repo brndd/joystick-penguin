@@ -232,30 +232,61 @@ Action parse_action(const YAML::Node& node, const std::string& where) {
         return AxisAction{field(node, "device", where),
                           ordinary_axis(required(node, "axis", where), where + ".axis"), invert};
     }
+    if (type == "mode") {
+        keys(node, where, {"type", "mode"});
+        return ModeAction{field(node, "mode", where)};
+    }
     throw ConfigError(where + ".type is unsupported");
+}
+
+std::vector<Action> parse_actions(const YAML::Node& node, const std::string& where) {
+    const auto action = node["action"];
+    const auto actions = node["actions"];
+    if (static_cast<bool>(action) == static_cast<bool>(actions))
+        throw ConfigError(where + " requires exactly one of 'action' or 'actions'");
+    std::vector<Action> result;
+    if (action) {
+        result.push_back(parse_action(action, where + ".action"));
+    } else {
+        expect_sequence(actions, where + ".actions");
+        if (actions.size() == 0) throw ConfigError(where + ".actions cannot be empty");
+        for (std::size_t i = 0; i < actions.size(); ++i)
+            result.push_back(parse_action(actions[i], where + ".actions[" +
+                                          std::to_string(i) + "]"));
+    }
+    return result;
 }
 
 Binding parse_binding(const YAML::Node& node, std::size_t index) {
     const auto where = "bindings[" + std::to_string(index) + "]";
-    keys(node, where, {"input", "modes", "modifiers", "action", "actions"});
+    keys(node, where, {"input", "modes", "modifiers", "action", "actions",
+                       "threshold_ms", "tap", "hold"});
     Binding binding;
     binding.input = input_control(required(node, "input", where), where + ".input");
     binding.modes = names(required(node, "modes", where), where + ".modes");
     if (binding.modes.empty()) throw ConfigError(where + ".modes cannot be empty");
     if (const auto modifiers = node["modifiers"])
         binding.modifiers = names(modifiers, where + ".modifiers");
-    const auto action = node["action"];
-    const auto actions = node["actions"];
-    if (static_cast<bool>(action) == static_cast<bool>(actions))
-        throw ConfigError(where + " requires exactly one of 'action' or 'actions'");
-    if (action) {
-        binding.actions.push_back(parse_action(action, where + ".action"));
+    if (node["threshold_ms"] || node["tap"] || node["hold"]) {
+        if (binding.input.kind != ControlKind::Button)
+            throw ConfigError(where + " tap/hold requires a button input");
+        if (node["action"] || node["actions"])
+            throw ConfigError(where + " cannot mix tap/hold with action or actions");
+        if (!node["tap"] && !node["hold"])
+            throw ConfigError(where + " requires tap or hold");
+        TapHold timing{number(required(node, "threshold_ms", where), where + ".threshold_ms",
+                              1, std::numeric_limits<int>::max()), {}, {}};
+        if (node["tap"]) {
+            keys(node["tap"], where + ".tap", {"action", "actions"});
+            timing.tap = parse_actions(node["tap"], where + ".tap");
+        }
+        if (node["hold"]) {
+            keys(node["hold"], where + ".hold", {"action", "actions"});
+            timing.hold = parse_actions(node["hold"], where + ".hold");
+        }
+        binding.tap_hold = std::move(timing);
     } else {
-        expect_sequence(actions, where + ".actions");
-        if (actions.size() == 0) throw ConfigError(where + ".actions cannot be empty");
-        for (std::size_t i = 0; i < actions.size(); ++i)
-            binding.actions.push_back(parse_action(actions[i], where + ".actions[" +
-                                                   std::to_string(i) + "]"));
+        binding.actions = parse_actions(node, where);
     }
     return binding;
 }
@@ -286,26 +317,41 @@ void validate_binding(const Config& config, std::size_t index) {
     const auto& binding = config.bindings[index];
     const auto where = "bindings[" + std::to_string(index) + "]";
     check_device(config, binding.input.device, DeviceKind::Evdev, where + ".input");
-    std::set<std::tuple<std::string, int, int>> targets;
-    for (const auto& action : binding.actions) {
-        std::visit([&](const auto& value) {
-            check_device(config, value.device, DeviceKind::Uinput, where + ".actions");
-            constexpr bool button = std::is_same_v<std::decay_t<decltype(value)>, ButtonAction>;
-            constexpr bool axis = std::is_same_v<std::decay_t<decltype(value)>, AxisAction>;
-            const int event_type = button ? EV_KEY : EV_ABS;
-            if (!targets.emplace(value.device, event_type, value.code).second)
-                throw ConfigError(where + " repeats output control " + value.device + ":" +
-                                  std::to_string(value.code));
-            if constexpr (axis) {
-                if (binding.input.kind != ControlKind::AbsoluteAxis)
-                    throw ConfigError(where + " axis actions require an absolute-axis input");
-                if (!config.devices.at(value.device).axes.contains(value.code))
-                    throw ConfigError(where + " requires declared output axis " + value.device + ":" +
-                                      std::to_string(value.code));
-            } else if (binding.input.kind == ControlKind::AbsoluteAxis) {
-                throw ConfigError(where + " absolute-axis inputs require axis actions");
-            }
-        }, action);
+    auto validate_actions = [&](const std::vector<Action>& actions) {
+        std::set<std::tuple<std::string, int, int>> targets;
+        for (const auto& action : actions) {
+            std::visit([&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<T, ModeAction>) {
+                    if (binding.input.kind != ControlKind::Button)
+                        throw ConfigError(where + " mode actions require a button input");
+                    if (!contains(config.modes, value.mode))
+                        throw ConfigError(where + " references unknown mode '" + value.mode + "'");
+                } else {
+                    check_device(config, value.device, DeviceKind::Uinput, where + ".actions");
+                    constexpr bool button = std::is_same_v<T, ButtonAction>;
+                    constexpr bool axis = std::is_same_v<T, AxisAction>;
+                    const int event_type = button ? EV_KEY : EV_ABS;
+                    if (!targets.emplace(value.device, event_type, value.code).second)
+                        throw ConfigError(where + " repeats output control " + value.device + ":" +
+                                          std::to_string(value.code));
+                    if constexpr (axis) {
+                        if (binding.input.kind != ControlKind::AbsoluteAxis)
+                            throw ConfigError(where + " axis actions require an absolute-axis input");
+                        if (!config.devices.at(value.device).axes.contains(value.code))
+                            throw ConfigError(where + " requires declared output axis " + value.device + ":" +
+                                              std::to_string(value.code));
+                    } else if (binding.input.kind == ControlKind::AbsoluteAxis) {
+                        throw ConfigError(where + " absolute-axis inputs require axis actions");
+                    }
+                }
+            }, action);
+        }
+    };
+    validate_actions(binding.actions);
+    if (binding.tap_hold) {
+        validate_actions(binding.tap_hold->tap);
+        validate_actions(binding.tap_hold->hold);
     }
     for (const auto& mode : binding.modes)
         if (!contains(config.modes, mode))

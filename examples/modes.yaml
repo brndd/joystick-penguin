@@ -1,0 +1,36 @@
+# Replace the stable path and input codes with those of your controller.
+# Numbers are Linux EV_KEY and EV_ABS codes.
+version: 1
+devices:
+  physical: {kind: evdev, path: /dev/input/by-id/example-event-joystick}
+  virtual:
+    kind: uinput
+    preset: joystick
+    axes:
+      0: {min: -32768, max: 32767, neutral: 0}
+      1: {min: -32768, max: 32767, neutral: 0}
+modes: {initial: default, names: [default, alternate]}
+bindings:
+  - input: {device: physical, button: 288}
+    modes: [default]
+    action: {type: button, device: virtual, button: 288}
+  - input: {device: physical, button: 288}
+    modes: [alternate]
+    action: {type: button, device: virtual, button: 289}
+  - input: {device: physical, axis: 0}
+    modes: [default]
+    action: {type: axis, device: virtual, axis: 0}
+  - input: {device: physical, axis: 0}
+    modes: [alternate]
+    action: {type: axis, device: virtual, axis: 1}
+  - input: {device: physical, button: 292}
+    modes: [default, alternate]
+    threshold_ms: 200
+    tap: {action: {type: button, device: virtual, button: 294}}
+    hold:
+      actions:
+        - {type: button, device: virtual, button: 295}
+        - {type: mode, mode: alternate}
+  - input: {device: physical, button: 293}
+    modes: [default, alternate]
+    action: {type: mode, mode: default}

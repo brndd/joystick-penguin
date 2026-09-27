@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -51,13 +52,24 @@ struct AxisAction {
     bool invert = false;
 };
 
-using Action = std::variant<ButtonAction, HatAction, AxisAction>;
+struct ModeAction {
+    std::string mode;
+};
+
+using Action = std::variant<ButtonAction, HatAction, AxisAction, ModeAction>;
+
+struct TapHold {
+    int threshold_ms;
+    std::vector<Action> tap;
+    std::vector<Action> hold;
+};
 
 struct Binding {
     Control input;
     std::vector<std::string> modes;
     std::vector<std::string> modifiers;
     std::vector<Action> actions;
+    std::optional<TapHold> tap_hold;
 };
 
 struct Config {

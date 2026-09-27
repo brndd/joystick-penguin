@@ -14,7 +14,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstring>
 #include <expected>
@@ -244,8 +246,8 @@ public:
                     rc < 0) return std::unexpected(error_text(label + " axis capabilities", -rc));
             }
             std::set<int> hats;
-            for (const auto& binding : config.bindings) {
-                for (const auto& action : binding.actions) {
+            auto advertise = [&](const std::vector<Action>& actions) -> std::expected<void, std::string> {
+                for (const auto& action : actions) {
                     if (const auto* button = std::get_if<ButtonAction>(&action)) {
                         if (button->device != name) continue;
                         if (const int rc = libevdev_enable_event_code(description.get(), EV_KEY,
@@ -260,6 +262,14 @@ public:
                                                                        hat->code, &info); rc < 0)
                             return std::unexpected(error_text(label + " hat capabilities", -rc));
                     }
+                }
+                return {};
+            };
+            for (const auto& binding : config.bindings) {
+                if (const auto result = advertise(binding.actions); !result) return result;
+                if (binding.tap_hold) {
+                    if (const auto result = advertise(binding.tap_hold->tap); !result) return result;
+                    if (const auto result = advertise(binding.tap_hold->hold); !result) return result;
                 }
             }
             libevdev_uinput* output = nullptr;
@@ -320,6 +330,18 @@ int run_hardware(const Config& config) {
         return 1;
     }
     OutputFrames frames(output, config);
+    std::cerr << "Initial mode: " << engine.mode() << '\n';
+
+    auto report_mode_change = [&](const std::string& previous) {
+        if (engine.mode() != previous)
+            std::cerr << "Mode changed: " << previous << " -> " << engine.mode() << '\n';
+    };
+    auto process = [&](const InputEvent& event) {
+        const std::string previous = engine.mode();
+        auto events = engine.process(event);
+        report_mode_change(previous);
+        return events;
+    };
 
     std::map<std::string, std::unique_ptr<EvdevInput>> inputs;
     for (const auto& [name, device] : config.devices) {
@@ -358,7 +380,7 @@ int run_hardware(const Config& config) {
             }
             if (result) {
                 reported_errors.erase(name);
-                for (const auto& baseline : input->baselines()) engine.process(baseline);
+                for (const auto& baseline : input->baselines()) process(baseline);
                 std::cerr << "Connected " << name << '\n';
             } else if (reported_errors[name] != result.error()) {
                 reported_errors[name] = result.error();
@@ -373,10 +395,24 @@ int run_hardware(const Config& config) {
             fds.push_back({input->descriptor(), POLLIN, 0});
             ready.push_back(input.get());
         }
-        const int rc = ::poll(fds.data(), fds.size(), 500);
+        int timeout = 500;
+        if (const auto deadline = engine.next_deadline()) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                *deadline - std::chrono::steady_clock::now()).count();
+            timeout = static_cast<int>(std::clamp<long long>(remaining + 1, 0, 500));
+        }
+        const int rc = ::poll(fds.data(), fds.size(), timeout);
         if (rc < 0) {
             if (errno == EINTR) continue;
             std::cerr << error_text("poll", errno) << '\n';
+            status = 1;
+            break;
+        }
+        const std::string previous_mode = engine.mode();
+        frames.add(engine.process_timers());
+        report_mode_change(previous_mode);
+        if (const auto written = frames.flush(); !written) {
+            std::cerr << written.error() << '\n';
             status = 1;
             break;
         }
@@ -398,7 +434,22 @@ int run_hardware(const Config& config) {
                             }
                         }
                         if (event.kind == InputEventKind::FrameEnd) continue;
-                        frames.add(engine.process(event));
+                        frames.add(process(event));
+                        if (engine.has_tap_release()) {
+                            if (const auto written = frames.flush(); !written) {
+                                std::cerr << written.error() << '\n';
+                                status = 1;
+                                stopping = 1;
+                                break;
+                            }
+                            frames.add(engine.finish_tap());
+                            if (const auto written = frames.flush(); !written) {
+                                std::cerr << written.error() << '\n';
+                                status = 1;
+                                stopping = 1;
+                                break;
+                            }
+                        }
                         if (event.kind == InputEventKind::SyncLost) {
                             if (const auto written = frames.flush(); !written) {
                                 std::cerr << written.error() << '\n';
@@ -422,7 +473,7 @@ int run_hardware(const Config& config) {
             }
             if (fds[index].revents & (POLLERR | POLLHUP | POLLNVAL)) lost = true;
             if (lost) {
-                frames.add(engine.process({input.name(), InputEventKind::Disconnected}));
+                frames.add(process({input.name(), InputEventKind::Disconnected}));
                 if (const auto written = frames.flush(); !written) {
                     std::cerr << written.error() << '\n';
                     status = 1;

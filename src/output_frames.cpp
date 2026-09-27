@@ -7,10 +7,18 @@ OutputFrames::OutputFrames(OutputSink& sink, const Config& config) : sink_(sink)
         if (device.kind == DeviceKind::Uinput)
             for (const auto& [code, range] : device.axes)
                 neutral_.emplace(Key{name, OutputEventKind::AbsoluteAxis, code}, range.neutral);
-    for (const auto& binding : config.bindings)
-        for (const auto& action : binding.actions)
+    auto hats = [this](const std::vector<Action>& actions) {
+        for (const auto& action : actions)
             if (const auto* hat = std::get_if<HatAction>(&action))
                 neutral_.emplace(Key{hat->device, OutputEventKind::AbsoluteAxis, hat->code}, 0);
+    };
+    for (const auto& binding : config.bindings) {
+        hats(binding.actions);
+        if (binding.tap_hold) {
+            hats(binding.tap_hold->tap);
+            hats(binding.tap_hold->hold);
+        }
+    }
 }
 
 void OutputFrames::add(const std::vector<OutputEvent>& events) {

@@ -28,7 +28,7 @@ The first usable release must support:
 - Arbitrarily named persistent modes selected by the configuration.
 - Held modifiers independent of persistent modes.
 - Tap-versus-hold actions, including actions that select a persistent mode.
-- Reliable output cleanup on physical release, persistent-mode change, device
+- Reliable output cleanup on physical release, persistent-mode transitions, device
   loss, and shutdown; reconnecting a controller restores its mappings.
 
 A small manually authored YAML profile is sufficient for this milestone. TTS,
@@ -96,20 +96,22 @@ concurrently with the engine.
 A **persistent mode** is a named operating context selected by configuration. A
 **modifier** is a physical control whose held state affects the selection of
 *new* gestures. Pressing or releasing a modifier is **not** a mode change and
-must not, by itself, cancel an existing output.
+must not, by itself, cancel an existing captured output.
 
 The engine maintains the persistent mode and the set of held modifiers
-separately. A persistent-mode change retains the first prototype's
-cancellation policy: active bindings invalid in the new mode are cleaned up
-immediately. A physical control still held across that change does not
-automatically activate a replacement binding.
+separately. A persistent-mode change retains captured button and hat outputs
+until their physical releases, even if their bindings are invalid in the new
+mode. A physical control still held across that change does not automatically
+activate a replacement binding. Active axes immediately reroute to bindings in
+the new mode using their cached physical positions.
 
 A modifier control may also have its own output binding. Select that binding
 from the modifier state **before** its own press is added to the held set;
 subsequent presses see the newly held modifier. A binding cannot require a
 modifier held by its own physical input, since it could never become eligible
 on that input's initial press. The modifier's own button output activates on
-press; tap-versus-hold behavior is a later milestone.
+press for immediate bindings. A tap/hold button declared as a modifier takes
+effect as a modifier immediately on press, independent of its action timer.
 
 ### 4.2 Gesture capture
 
@@ -158,7 +160,7 @@ direction-to-direction movement must release or update the previous direction
 correctly. The two axes of a hat must support diagonals without interfering
 with each other.
 
-Absolute axes use **live modifier routing**, deliberately distinct from
+Absolute axes use **live mode and modifier routing**, deliberately distinct from
 captured button and hat gestures. Cache the latest physical position, including
 before the first movement. While a modifier is held, an eligible modified axis
 binding receives new values; pressing or releasing a modifier immediately
@@ -168,8 +170,8 @@ When no destination is selected, remove ownership without asserting a new one.
 This policy also applies to non-centering throttles: they need no assumed
 return-to-zero point to change destinations. On initial connection or
 reconnection, cache physical axis positions without asserting outputs solely
-because the device appeared; the next physical axis or modifier event may
-activate routing.
+because the device appeared; the next physical axis, modifier, or mode event
+may activate routing.
 
 Virtual absolute outputs must declare valid ranges and neutral values. Hats
 use a ternary range and zero neutral. If several physical actions drive the
@@ -182,9 +184,14 @@ hat axis so diagonal movement is possible without interference.
 
 A tap/hold binding is selected when its physical button is pressed. Its
 threshold timer and resulting actions belong to that captured gesture, even
-if modifier state changes before the threshold or release. Mode-changing
-actions remain persistent-mode changes and apply the normal mode-transition
-cleanup policy.
+if mode or modifier state changes before the threshold or release. Before the
+threshold, release triggers the tap branch: virtual button/hat assertions and
+releases occupy separate output frames. At or after the threshold, the hold
+branch activates while the button is down and its owned outputs release on
+physical release. Either branch may be omitted. Pressing another control does
+not accelerate the timer. A hold mode action changes mode at threshold; mode
+actions persist after release. A mode change never cancels a captured hold
+branch's outputs.
 
 Use a controllable clock in tests so behavior at, before, and after the
 threshold is deterministic.
@@ -192,9 +199,9 @@ threshold is deterministic.
 ### 4.5 Cleanup
 
 Every action must support the cleanup appropriate to its output. Cleanup is
-required on physical release, applicable persistent-mode change, device loss,
-and orderly shutdown. It must not emit a release for an output the action
-never asserted.
+required on physical release, live axis rerouting on persistent-mode change,
+device loss, and orderly shutdown. It must not emit a release for an output
+the action never asserted.
 
 Live reload is deferred, but the engine's state model must permit a future
 reload to cancel active gestures and clear output ownership before replacing
@@ -267,6 +274,21 @@ devices:
 
 See `examples/controls.yaml` for complete physical hat and axis bindings.
 
+`{type: mode, mode: alternate}` selects a persistent mode, without naming an
+output device. On a button binding, `threshold_ms` (positive milliseconds)
+enables `tap` and/or `hold`; each branch contains one `action` or a nonempty
+`actions` list. These replace the binding's ordinary `action`/`actions` fields:
+
+```yaml
+- input: {device: controller_a, button: 288}
+  modes: [default, alternate]
+  threshold_ms: 200
+  tap: {action: {type: button, device: virtual_a, button: 290}}
+  hold: {action: {type: mode, mode: alternate}}
+```
+
+See `examples/modes.yaml` for a runnable profile.
+
 The configuration loader must validate device references, modifier names,
 input and output capabilities, mode references, and ambiguous binding
 precedence before starting the engine. Document whether numeric button values
@@ -336,8 +358,8 @@ deterministic output fixtures.
 
 Automated tests must cover modifier ordering, release ordering, overlapping
 virtual-button ownership, key repeats, timer thresholds, hat direction
-changes and diagonals, mode-transition cancellation, cross-controller
-routing, and device-loss cleanup.
+changes and diagonals, mode-transition axis rerouting and captured-output
+retention, cross-controller routing, and device-loss cleanup.
 
 Verify that an enabled exclusive grab prevents another evdev consumer from
 receiving raw events, that disabling it permits shared input, and that a

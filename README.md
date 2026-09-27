@@ -2,8 +2,8 @@
 
 Linux virtual joystick remapper inspired by Joystick Gremlin and Joyful.
 The current prototype maps physical joystick buttons, hats, and absolute axes
-to virtual joysticks, including held modifiers. Modes and tap/hold actions are
-still in development.
+to virtual joysticks, including held modifiers, persistent modes, and tap/hold
+buttons.
 
 ## Build
 
@@ -25,7 +25,8 @@ button code it supports. `evtest <physical-link>` lists the codes; button
 numbers in profiles are **Linux event codes**, not button indices.
 [examples/gestures.yaml](examples/gestures.yaml) demonstrates modifier capture
 and multiple outputs. [examples/controls.yaml](examples/controls.yaml) maps
-axes and diagonal hats across two controllers. Edit their physical paths to
+axes and diagonal hats across two controllers. [examples/modes.yaml](examples/modes.yaml)
+demonstrates mode changes and tap/hold buttons. Edit their physical paths to
 try them.
 
 ```sh
@@ -39,8 +40,12 @@ device and virtual event node, and write access to `/dev/uinput`. If a grab
 fails, close any other remapper using that physical device.
 
 Use `./build/joystick-penguin --check <profile.yaml>` to validate a profile
-without opening devices. [examples/basic.yaml](examples/basic.yaml) illustrates
-multiple declared modes and currently works with `--check` only.
+without opening devices. A mode action is `{type: mode, mode: alternate}`.
+Button bindings may specify a positive `threshold_ms` and `tap` and/or `hold`
+branches, each containing an `action` or `actions` list. A short release pulses
+tap outputs; reaching the threshold activates hold outputs, which release with
+the physical button. Mode selections persist until another mode action changes
+them. Captured buttons and hats stay held across mode changes; axes reroute live.
 
 See [NOTES.md](NOTES.md) for implementation details and current limitations,
 [the specification](AGENTS/SPEC.md) for planned features, and [LICENSE](LICENSE)

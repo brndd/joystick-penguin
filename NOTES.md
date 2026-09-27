@@ -5,8 +5,8 @@
 The running remapper supports buttons, directional hats, and absolute axes,
 including held modifiers, multiple actions per binding, and cross-controller
 routing. It accepts any number of named evdev inputs and uinput joysticks.
-Persistent mode changes, tap/hold, and additional output types are later
-milestones; runtime profiles currently require one persistent mode.
+Persistent modes and timer-driven tap/hold button bindings are supported.
+Additional output types are later milestones.
 Profiles containing unsupported runtime features are rejected rather than
 silently partially applied. `--check` only checks the versioned YAML profile;
 it does not open devices or check their capabilities.
@@ -104,7 +104,7 @@ both forms produce the same typed actions. Numeric `button` and
 ## Verification
 
 `ctest --test-dir build --output-on-failure` runs configuration,
-gesture-engine, hat/axis, and output-frame tests plus an end-to-end hardware
+gesture-engine, hat/axis, mode/tap-hold, and output-frame tests plus an end-to-end hardware
 test using synthetic evdev devices. CTest marks that last test skipped if
 `/dev/uinput` is unwritable or the generated `/dev/input/eventN` nodes are
 unreadable. Where suitable, it can
@@ -127,3 +127,25 @@ For control coverage, edit the two stable physical paths in
 with `evtest`, move sticks and throttle, switch Shift while the stick is held,
 and move the hat around all four diagonals. Check the advertised virtual
 axis and hat ranges as well as the resulting events.
+
+## Modes and tap/hold
+
+Bindings are indexed across all configured modes. A mode action selects a
+persistent mode for future button and hat gestures; already captured gestures
+and pending tap/hold deadlines remain attached to their original binding until
+release. Axes instead reroute their cached position immediately on a mode
+change. A button's `threshold_ms` and optional `tap`/`hold` branches capture
+the current binding at press time. The engine uses an injectable `Clock` and
+exposes its next deadline to the poll loop; expired timers run serially with
+input events. Releasing before the deadline activates tap actions, followed by
+their cleanup in a second virtual frame. At the deadline, hold actions
+activate while the button is held and clean up at release. A mode action in
+either branch persists after release. Device loss and shutdown cancel pending
+deadlines without triggering a tap. See [examples/modes.yaml](examples/modes.yaml).
+To try it with `evtest`, hold button 288, then hold button 292 past 200 ms:
+288 remains asserted until released, 295 asserts during the hold, and new
+presses of 288 use output 289. Moving physical axis 0 routes to virtual axis 1
+in the alternate mode. Tap button 292 to pulse 294 in two output frames; press
+293 to return to the default mode.
+The remapper prints `Initial mode: default` on startup and logs persistent
+transitions such as `Mode changed: default -> alternate` when they occur.

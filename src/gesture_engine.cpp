@@ -5,6 +5,14 @@
 #include <stdexcept>
 
 namespace joystick_penguin {
+namespace {
+
+const Clock& steady_clock() {
+    static const SteadyClock clock;
+    return clock;
+}
+
+} // namespace
 
 // Keep only the final value of a control within one input event. A direct hat
 // reversal, for example, should not expose an intermediate neutral output.
@@ -23,11 +31,10 @@ std::vector<OutputEvent> GestureEngine::OutputChanges::finish() const {
     return events;
 }
 
-GestureEngine::GestureEngine(const Config& config)
-    : mode_(config.initial_mode), bindings_(config.bindings) {
-    if (config.modes.size() != 1 || config.modes.front() != mode_)
-        throw ConfigError("gesture engine supports one persistent mode; mode transitions are not implemented yet");
+GestureEngine::GestureEngine(const Config& config) : GestureEngine(config, steady_clock()) {}
 
+GestureEngine::GestureEngine(const Config& config, const Clock& clock)
+    : mode_(config.initial_mode), clock_(clock), bindings_(config.bindings) {
     for (const auto& [name, device] : config.devices)
         if (device.kind == DeviceKind::Uinput)
             for (const auto& [code, range] : device.axes) {
@@ -46,48 +53,62 @@ GestureEngine::GestureEngine(const Config& config)
     // index in each gesture for later cleanup and eventual mode transitions.
     for (std::size_t index = 0; index < bindings_.size(); ++index) {
         const auto& binding = bindings_[index];
-        if (binding.actions.empty()) throw ConfigError("bindings require at least one action");
+        if (binding.actions.empty() && !binding.tap_hold)
+            throw ConfigError("bindings require at least one action");
         for (const auto& modifier : binding.modifiers) {
             const auto source = modifiers_by_input_.find({binding.input.device, binding.input.code});
             if (source != modifiers_by_input_.end() &&
                 std::find(source->second.begin(), source->second.end(), modifier) != source->second.end())
                 throw ConfigError("a button cannot require its own modifier '" + modifier + "'");
         }
-        for (const auto& action : binding.actions) {
-            if (const auto* axis = std::get_if<AxisAction>(&action)) {
-                if (binding.input.kind != ControlKind::AbsoluteAxis ||
-                    !output_ranges_.contains({axis->device, OutputEventKind::AbsoluteAxis, axis->code}))
-                    throw ConfigError("axis actions require an axis input and a declared output range");
-            } else if (binding.input.kind == ControlKind::AbsoluteAxis) {
-                throw ConfigError("axis inputs require axis actions");
+        auto index_actions = [&](const std::vector<Action>& actions) {
+            for (const auto& action : actions) {
+                if (const auto* axis = std::get_if<AxisAction>(&action)) {
+                    if (binding.input.kind != ControlKind::AbsoluteAxis ||
+                        !output_ranges_.contains({axis->device, OutputEventKind::AbsoluteAxis, axis->code}))
+                        throw ConfigError("axis actions require an axis input and a declared output range");
+                } else if (binding.input.kind == ControlKind::AbsoluteAxis) {
+                    throw ConfigError("axis inputs require axis actions");
+                }
+                if (const auto* hat = std::get_if<HatAction>(&action))
+                    neutrals_.emplace(OutputKey{hat->device, OutputEventKind::AbsoluteAxis, hat->code}, 0);
             }
-            if (const auto* hat = std::get_if<HatAction>(&action))
-                neutrals_.emplace(OutputKey{hat->device, OutputEventKind::AbsoluteAxis, hat->code}, 0);
+        };
+        index_actions(binding.actions);
+        if (binding.tap_hold) {
+            index_actions(binding.tap_hold->tap);
+            index_actions(binding.tap_hold->hold);
         }
-        if (std::find(binding.modes.begin(), binding.modes.end(), mode_) != binding.modes.end()) {
-            candidates_[{binding.input.device, binding.input.kind,
-                         binding.input.code, binding.input.direction}].push_back(index);
-            const Key source{binding.input.device, binding.input.code};
-            if (binding.input.kind == ControlKind::HatDirection) hat_inputs_.insert(source);
-            if (binding.input.kind == ControlKind::AbsoluteAxis) axis_inputs_.insert(source);
-        }
+        candidates_[{binding.input.device, binding.input.kind,
+                     binding.input.code, binding.input.direction}].push_back(index);
+        const Key source{binding.input.device, binding.input.code};
+        if (binding.input.kind == ControlKind::HatDirection) hat_inputs_.insert(source);
+        if (binding.input.kind == ControlKind::AbsoluteAxis) axis_inputs_.insert(source);
     }
     for (const auto& [source, indices] : candidates_)
         for (std::size_t i = 0; i < indices.size(); ++i)
             for (std::size_t j = 0; j < i; ++j)
-                if (bindings_[indices[i]].modifiers.size() == bindings_[indices[j]].modifiers.size())
+                if (bindings_[indices[i]].modifiers.size() == bindings_[indices[j]].modifiers.size() &&
+                    std::any_of(bindings_[indices[i]].modes.begin(), bindings_[indices[i]].modes.end(),
+                        [&](const auto& mode) {
+                            const auto& other = bindings_[indices[j]].modes;
+                            return std::find(other.begin(), other.end(), mode) != other.end();
+                        }))
                     throw ConfigError("equally specific bindings for input '" + source.device + ":" +
                                       std::to_string(source.code) + "'");
 }
 
 std::optional<std::size_t> GestureEngine::select(
-    const InputKey& source, const std::set<std::string>& modifiers) const {
+    const InputKey& source, const std::set<std::string>& modifiers,
+    const std::string& mode) const {
     // Only modifiers held at selection time matter; the most specific eligible
     // binding wins, with an unmodified binding acting as the fallback.
     const auto found = candidates_.find(source);
     if (found == candidates_.end()) return std::nullopt;
     std::optional<std::size_t> selected;
     for (const auto index : found->second) {
+        const auto& modes = bindings_[index].modes;
+        if (std::find(modes.begin(), modes.end(), mode) == modes.end()) continue;
         const auto& required = bindings_[index].modifiers;
         if (!std::all_of(required.begin(), required.end(), [&modifiers](const std::string& name) {
                 return modifiers.contains(name);
@@ -139,24 +160,43 @@ void GestureEngine::release_claim(const OutputClaim& claim, OutputChanges& chang
 }
 
 GestureEngine::Gesture GestureEngine::begin_gesture(const InputKey& source, OutputChanges& changes) {
-    // Capture button/hat actions once. Releasing modifiers later never reselects
-    // this gesture's binding or changes the outputs it owns.
+    // Capture button/hat bindings once. Mode and modifier changes never reselect
+    // this gesture, including while its tap/hold timer is pending.
     Gesture gesture;
-    gesture.binding_index = select(source, held_modifiers_);
+    gesture.binding_index = select(source, held_modifiers_, mode_);
     if (!gesture.binding_index) return gesture;
-    for (const auto& action : bindings_[*gesture.binding_index].actions) {
+    const auto& binding = bindings_[*gesture.binding_index];
+    if (binding.tap_hold) {
+        gesture.deadline = clock_.now() + std::chrono::milliseconds(binding.tap_hold->threshold_ms);
+        return gesture;
+    }
+    activate(binding.actions, gesture.outputs, changes);
+    return gesture;
+}
+
+void GestureEngine::activate(const std::vector<Action>& actions,
+                             std::vector<OutputClaim>& outputs, OutputChanges& changes) {
+    for (const auto& action : actions) {
         if (const auto* button = std::get_if<ButtonAction>(&action)) {
             const OutputKey target{button->device, OutputEventKind::Button, button->code};
-            gesture.outputs.push_back({target, next_owner_++});
+            outputs.push_back({target, next_owner_++});
             assert_button(target, changes);
         } else if (const auto* hat = std::get_if<HatAction>(&action)) {
             const OutputKey target{hat->device, OutputEventKind::AbsoluteAxis, hat->code};
             const auto owner = next_owner_++;
-            gesture.outputs.push_back({target, owner});
+            outputs.push_back({target, owner});
             update_abs(target, owner, hat->direction, changes);
+        } else if (const auto* mode = std::get_if<ModeAction>(&action)) {
+            change_mode(mode->mode, changes);
         }
     }
-    return gesture;
+}
+
+void GestureEngine::change_mode(const std::string& mode, OutputChanges& changes) {
+    if (mode == mode_) return;
+    const auto previous = mode_;
+    mode_ = mode;
+    reroute_axes(held_modifiers_, previous, changes);
 }
 
 void GestureEngine::end_gesture(const Gesture& gesture, OutputChanges& changes) {
@@ -166,12 +206,21 @@ void GestureEngine::end_gesture(const Gesture& gesture, OutputChanges& changes) 
 void GestureEngine::release_button(const Key& source, OutputChanges& changes) {
     const auto gesture = down_.find(source);
     if (gesture == down_.end()) return;
+    if (gesture->second.deadline) {
+        const auto& timing = *bindings_[*gesture->second.binding_index].tap_hold;
+        if (!gesture->second.hold_activated && clock_.now() >= *gesture->second.deadline) {
+            gesture->second.hold_activated = true;
+            activate(timing.hold, gesture->second.outputs, changes);
+        }
+        if (!gesture->second.hold_activated)
+            activate(timing.tap, tap_outputs_, changes);
+    }
     end_gesture(gesture->second, changes);
     down_.erase(gesture);
     if (const auto modifiers = modifiers_by_input_.find(source); modifiers != modifiers_by_input_.end()) {
         const auto previous = held_modifiers_;
         for (const auto& name : modifiers->second) held_modifiers_.erase(name);
-        reroute_axes(previous, changes);
+        reroute_axes(previous, mode_, changes);
     }
 }
 
@@ -227,14 +276,15 @@ void GestureEngine::route_axis(const Key& source, AxisState& state,
     }
 }
 
-void GestureEngine::reroute_axes(const std::set<std::string>& previous, OutputChanges& changes) {
+void GestureEngine::reroute_axes(const std::set<std::string>& previous,
+                                 const std::string& previous_mode, OutputChanges& changes) {
     // A cached baseline is inert on connection. A modifier change can activate
     // it, but an unrelated modifier must not create an ordinary axis output.
     for (auto& [source, state] : axes_) {
         const InputKey input{source.first, ControlKind::AbsoluteAxis, source.second};
-        const auto selected = select(input, held_modifiers_);
+        const auto selected = select(input, held_modifiers_, mode_);
         if (!state.active) {
-            if (select(input, previous) == selected) continue;
+            if (select(input, previous, previous_mode) == selected) continue;
             state.active = true; // A modifier event may use a cached physical position.
         }
         if (state.binding != selected) route_axis(source, state, selected, changes);
@@ -267,7 +317,7 @@ void GestureEngine::process_axis(const InputEvent& event, OutputChanges& changes
             state.maximum = event.maximum;
             state.active = true;
             route_axis(source, state, select({event.device, ControlKind::AbsoluteAxis,
-                                               event.code}, held_modifiers_), changes);
+                                               event.code}, held_modifiers_, mode_), changes);
         }
     }
 }
@@ -294,7 +344,7 @@ void GestureEngine::release_device(const std::string& device, OutputChanges& cha
         for (const auto& claim : it->second.outputs) release_claim(claim, changes);
         it = axes_.erase(it);
     }
-    if (previous != held_modifiers_) reroute_axes(previous, changes);
+    if (previous != held_modifiers_) reroute_axes(previous, mode_, changes);
 }
 
 std::vector<OutputEvent> GestureEngine::process(const InputEvent& event) {
@@ -313,7 +363,7 @@ std::vector<OutputEvent> GestureEngine::process(const InputEvent& event) {
                 modifiers != modifiers_by_input_.end()) {
                 const auto previous = held_modifiers_;
                 for (const auto& name : modifiers->second) held_modifiers_.insert(name);
-                reroute_axes(previous, changes);
+                reroute_axes(previous, mode_, changes);
             }
         }
     } else if (event.kind == InputEventKind::AbsoluteAxis ||
@@ -325,6 +375,8 @@ std::vector<OutputEvent> GestureEngine::process(const InputEvent& event) {
 
 std::vector<OutputEvent> GestureEngine::release_all() {
     OutputChanges changes;
+    for (const auto& claim : tap_outputs_) release_claim(claim, changes);
+    tap_outputs_.clear();
     for (const auto& [source, gesture] : down_) end_gesture(gesture, changes);
     down_.clear();
     held_modifiers_.clear();
@@ -334,6 +386,39 @@ std::vector<OutputEvent> GestureEngine::release_all() {
     for (const auto& [source, state] : axes_)
         for (const auto& claim : state.outputs) release_claim(claim, changes);
     axes_.clear();
+    return changes.finish();
+}
+
+std::optional<Clock::TimePoint> GestureEngine::next_deadline() const {
+    std::optional<Clock::TimePoint> next;
+    for (const auto& [source, gesture] : down_)
+        if (gesture.deadline && !gesture.hold_activated && (!next || *gesture.deadline < *next))
+            next = gesture.deadline;
+    return next;
+}
+
+std::vector<OutputEvent> GestureEngine::process_timers() {
+    OutputChanges changes;
+    std::vector<Key> due;
+    const auto now = clock_.now();
+    for (const auto& [source, gesture] : down_)
+        if (gesture.deadline && !gesture.hold_activated && now >= *gesture.deadline)
+            due.push_back(source);
+    std::stable_sort(due.begin(), due.end(), [this](const Key& a, const Key& b) {
+        return *down_.at(a).deadline < *down_.at(b).deadline;
+    });
+    for (const auto& source : due) {
+        auto& gesture = down_.at(source);
+        gesture.hold_activated = true;
+        activate(bindings_[*gesture.binding_index].tap_hold->hold, gesture.outputs, changes);
+    }
+    return changes.finish();
+}
+
+std::vector<OutputEvent> GestureEngine::finish_tap() {
+    OutputChanges changes;
+    for (const auto& claim : tap_outputs_) release_claim(claim, changes);
+    tap_outputs_.clear();
     return changes.finish();
 }
 

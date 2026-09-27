@@ -146,15 +146,12 @@ void test_ownership_and_loss() {
     expect(engine.release_all(), {}, "shutdown cleanup is idempotent");
 }
 
-void test_modes_still_deferred() {
+void test_multiple_modes_are_supported() {
     auto config = profile();
     config.modes.push_back("alternate");
-    try {
-        GestureEngine engine(config);
-        throw std::runtime_error("accepted unsupported mode transitions");
-    } catch (const ConfigError&) {
-        // Persistent mode selection is a later milestone.
-    }
+    GestureEngine engine(config);
+    expect(engine.process(down("a", 304)), {{"v1", 305, 1}}, "initial mode remains usable");
+    expect(engine.process(up("a", 304)), {{"v1", 305, 0}}, "multiple modes release");
 }
 
 } // namespace
@@ -165,7 +162,7 @@ int main() {
         test_pre_press_snapshot_and_specificity();
         test_unmapped_and_repeats();
         test_ownership_and_loss();
-        test_modes_still_deferred();
+        test_multiple_modes_are_supported();
         std::cout << "gesture engine tests passed\n";
         return 0;
     } catch (const std::exception& error) {
