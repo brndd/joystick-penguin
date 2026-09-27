@@ -1,9 +1,9 @@
 # Joystick Penguin
 
 Linux virtual joystick remapper inspired by Joystick Gremlin and Joyful.
-The current prototype maps physical buttons to virtual joystick buttons,
-including held modifiers. Other controls and mapping features are still in
-development.
+The current prototype maps physical joystick buttons, hats, and absolute axes
+to virtual joysticks, including held modifiers. Modes and tap/hold actions are
+still in development.
 
 ## Build
 
@@ -24,7 +24,9 @@ your joystick's `/dev/input/by-id/` or `/dev/input/by-path/` link and choose a
 button code it supports. `evtest <physical-link>` lists the codes; button
 numbers in profiles are **Linux event codes**, not button indices.
 [examples/gestures.yaml](examples/gestures.yaml) demonstrates modifier capture
-and multiple outputs; edit its physical path the same way to try it.
+and multiple outputs. [examples/controls.yaml](examples/controls.yaml) maps
+axes and diagonal hats across two controllers. Edit their physical paths to
+try them.
 
 ```sh
 ./build/joystick-penguin examples/hardware.yaml

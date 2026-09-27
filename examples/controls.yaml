@@ -1,0 +1,50 @@
+# Replace the paths with stable links to your own controllers.
+# The example uses Linux codes ABS_X=0, ABS_Y=1, ABS_Z=2,
+# ABS_HAT0X=16, ABS_HAT0Y=17, and BTN_TOP2=292.
+version: 1
+devices:
+  left:
+    kind: evdev
+    path: /dev/input/by-id/example-left-event-joystick
+    grab: true
+  right:
+    kind: evdev
+    path: /dev/input/by-id/example-right-event-joystick
+    grab: true
+  virtual_stick:
+    kind: uinput
+    preset: joystick
+    axes:
+      0: {min: -32768, max: 32767, neutral: 0}
+      1: {min: -32768, max: 32767, neutral: 0}
+      2: {min: 0, max: 255, neutral: 0}
+  virtual_hat:
+    kind: uinput
+    preset: joystick
+modes: {initial: default, names: [default]}
+modifiers:
+  shift:
+    input: {device: right, button: 292}
+bindings:
+  - input: {device: left, axis: 0}
+    modes: [default]
+    action: {type: axis, device: virtual_stick, axis: 0}
+  - input: {device: left, axis: 0}
+    modes: [default]
+    modifiers: [shift]
+    action: {type: axis, device: virtual_stick, axis: 1}
+  - input: {device: left, axis: 2} # Throttle: no return-to-center assumption
+    modes: [default]
+    action: {type: axis, device: virtual_stick, axis: 2}
+  - input: {device: right, hat: {axis: 16, direction: -1}}
+    modes: [default]
+    action: {type: hat, device: virtual_hat, axis: 16, direction: -1}
+  - input: {device: right, hat: {axis: 16, direction: 1}}
+    modes: [default]
+    action: {type: hat, device: virtual_hat, axis: 16, direction: 1}
+  - input: {device: right, hat: {axis: 17, direction: -1}}
+    modes: [default]
+    action: {type: hat, device: virtual_hat, axis: 17, direction: -1}
+  - input: {device: right, hat: {axis: 17, direction: 1}}
+    modes: [default]
+    action: {type: hat, device: virtual_hat, axis: 17, direction: 1}

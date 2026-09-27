@@ -8,6 +8,8 @@
 #include <limits>
 #include <set>
 #include <string_view>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace joystick_penguin {
@@ -51,7 +53,7 @@ std::string field(const YAML::Node& node, const char* name, const std::string& w
     return text(required(node, name, where), where + "." + name);
 }
 
-int number(const YAML::Node& node, const std::string& where, int minimum, int maximum) {
+int integer(const YAML::Node& node, const std::string& where) {
     if (!node.IsScalar()) throw ConfigError(where + " must be an integer");
     int value;
     try {
@@ -59,8 +61,33 @@ int number(const YAML::Node& node, const std::string& where, int minimum, int ma
     } catch (const YAML::BadConversion&) {
         throw ConfigError(where + " must be an integer");
     }
+    return value;
+}
+
+int number(const YAML::Node& node, const std::string& where, int minimum, int maximum) {
+    const int value = integer(node, where);
     if (value < minimum || value > maximum)
-        throw ConfigError(where + " is outside the supported Linux event-code range");
+        throw ConfigError(where + " is out of permitted range");
+    return value;
+}
+
+bool is_hat_axis(int code) { return code >= ABS_HAT0X && code <= ABS_HAT3Y; }
+
+int hat_axis(const YAML::Node& node, const std::string& where) {
+    const int code = number(node, where, 0, ABS_MAX);
+    if (!is_hat_axis(code)) throw ConfigError(where + " must be an ABS_HAT* axis code");
+    return code;
+}
+
+int ordinary_axis(const YAML::Node& node, const std::string& where) {
+    const int code = number(node, where, 0, ABS_MAX);
+    if (is_hat_axis(code)) throw ConfigError(where + " is a hat axis; use 'hat' instead");
+    return code;
+}
+
+int direction(const YAML::Node& node, const std::string& where) {
+    const int value = integer(node, where);
+    if (value != -1 && value != 1) throw ConfigError(where + " must be -1 or 1");
     return value;
 }
 
@@ -77,16 +104,41 @@ std::vector<std::string> names(const YAML::Node& node, const std::string& where)
 }
 
 Control input_control(const YAML::Node& node, const std::string& where) {
-    keys(node, where, {"device", "button", "axis"});
+    keys(node, where, {"device", "button", "axis", "hat"});
     const auto button = node["button"];
     const auto axis = node["axis"];
-    if (static_cast<bool>(button) == static_cast<bool>(axis))
-        throw ConfigError(where + " requires exactly one of 'button' or 'axis'");
+    const auto hat = node["hat"];
+    if (static_cast<int>(bool(button)) + int(bool(axis)) + int(bool(hat)) != 1)
+        throw ConfigError(where + " requires exactly one of 'button', 'axis', or 'hat'");
     if (button)
         return {field(node, "device", where), ControlKind::Button,
                 number(button, where + ".button", BTN_MISC, KEY_MAX)};
-    return {field(node, "device", where), ControlKind::AbsoluteAxis,
-            number(axis, where + ".axis", 0, ABS_MAX)};
+    if (axis)
+        return {field(node, "device", where), ControlKind::AbsoluteAxis,
+                ordinary_axis(axis, where + ".axis")};
+    keys(hat, where + ".hat", {"axis", "direction"});
+    return {field(node, "device", where), ControlKind::HatDirection,
+            hat_axis(required(hat, "axis", where + ".hat"), where + ".hat.axis"),
+            direction(required(hat, "direction", where + ".hat"), where + ".hat.direction")};
+}
+
+std::map<int, AxisRange> parse_axes(const YAML::Node& node, const std::string& where) {
+    expect_map(node, where);
+    std::map<int, AxisRange> axes;
+    for (const auto& entry : node) {
+        const int code = ordinary_axis(entry.first, where + " axis code");
+        const auto path = where + "." + std::to_string(code);
+        keys(entry.second, path, {"min", "max", "neutral"});
+        const AxisRange range{integer(required(entry.second, "min", path), path + ".min"),
+                              integer(required(entry.second, "max", path), path + ".max"),
+                              integer(required(entry.second, "neutral", path), path + ".neutral")};
+        if (range.minimum >= range.maximum || range.neutral < range.minimum ||
+            range.neutral > range.maximum)
+            throw ConfigError(path + " requires min < max and min <= neutral <= max");
+        if (!axes.emplace(code, range).second)
+            throw ConfigError(where + " repeats absolute axis " + std::to_string(code));
+    }
+    return axes;
 }
 
 bool contains(const std::vector<std::string>& entries, const std::string& name) {
@@ -109,10 +161,13 @@ Device parse_device(const YAML::Node& node, const std::string& where) {
         return device;
     }
     if (kind == "uinput") {
-        keys(node, where, {"kind", "preset"});
+        keys(node, where, {"kind", "preset", "axes"});
         const auto preset = field(node, "preset", where);
         if (preset != "joystick") throw ConfigError(where + ".preset must be 'joystick'");
-        return {DeviceKind::Uinput, "", true, preset};
+        Device device{DeviceKind::Uinput, "", true, preset};
+        if (const auto axes = node["axes"])
+            device.axes = parse_axes(axes, where + ".axes");
+        return device;
     }
     throw ConfigError(where + ".kind is unsupported: '" + kind + "'");
 }
@@ -151,12 +206,33 @@ std::map<std::string, Control> parse_modifiers(const YAML::Node& node) {
     return modifiers;
 }
 
-ButtonAction parse_action(const YAML::Node& node, const std::string& where) {
-    keys(node, where, {"type", "device", "button"});
-    if (field(node, "type", where) != "button")
-        throw ConfigError(where + ".type is unsupported");
-    return {field(node, "device", where),
-            number(required(node, "button", where), where + ".button", BTN_MISC, KEY_MAX)};
+Action parse_action(const YAML::Node& node, const std::string& where) {
+    const auto type = field(node, "type", where);
+    if (type == "button") {
+        keys(node, where, {"type", "device", "button"});
+        return ButtonAction{field(node, "device", where),
+                            number(required(node, "button", where), where + ".button", BTN_MISC, KEY_MAX)};
+    }
+    if (type == "hat") {
+        keys(node, where, {"type", "device", "axis", "direction"});
+        return HatAction{field(node, "device", where),
+                         hat_axis(required(node, "axis", where), where + ".axis"),
+                         direction(required(node, "direction", where), where + ".direction")};
+    }
+    if (type == "axis") {
+        keys(node, where, {"type", "device", "axis", "invert"});
+        bool invert = false;
+        if (const auto value = node["invert"]) {
+            try {
+                invert = value.as<bool>();
+            } catch (const YAML::BadConversion&) {
+                throw ConfigError(where + ".invert must be a boolean");
+            }
+        }
+        return AxisAction{field(node, "device", where),
+                          ordinary_axis(required(node, "axis", where), where + ".axis"), invert};
+    }
+    throw ConfigError(where + ".type is unsupported");
 }
 
 Binding parse_binding(const YAML::Node& node, std::size_t index) {
@@ -164,8 +240,6 @@ Binding parse_binding(const YAML::Node& node, std::size_t index) {
     keys(node, where, {"input", "modes", "modifiers", "action", "actions"});
     Binding binding;
     binding.input = input_control(required(node, "input", where), where + ".input");
-    if (binding.input.kind != ControlKind::Button)
-        throw ConfigError(where + " only button inputs are supported in this milestone");
     binding.modes = names(required(node, "modes", where), where + ".modes");
     if (binding.modes.empty()) throw ConfigError(where + ".modes cannot be empty");
     if (const auto modifiers = node["modifiers"])
@@ -212,12 +286,26 @@ void validate_binding(const Config& config, std::size_t index) {
     const auto& binding = config.bindings[index];
     const auto where = "bindings[" + std::to_string(index) + "]";
     check_device(config, binding.input.device, DeviceKind::Evdev, where + ".input");
-    std::set<std::pair<std::string, int>> targets;
+    std::set<std::tuple<std::string, int, int>> targets;
     for (const auto& action : binding.actions) {
-        check_device(config, action.device, DeviceKind::Uinput, where + ".actions");
-        if (!targets.emplace(action.device, action.code).second)
-            throw ConfigError(where + " repeats output button " + action.device + ":" +
-                              std::to_string(action.code));
+        std::visit([&](const auto& value) {
+            check_device(config, value.device, DeviceKind::Uinput, where + ".actions");
+            constexpr bool button = std::is_same_v<std::decay_t<decltype(value)>, ButtonAction>;
+            constexpr bool axis = std::is_same_v<std::decay_t<decltype(value)>, AxisAction>;
+            const int event_type = button ? EV_KEY : EV_ABS;
+            if (!targets.emplace(value.device, event_type, value.code).second)
+                throw ConfigError(where + " repeats output control " + value.device + ":" +
+                                  std::to_string(value.code));
+            if constexpr (axis) {
+                if (binding.input.kind != ControlKind::AbsoluteAxis)
+                    throw ConfigError(where + " axis actions require an absolute-axis input");
+                if (!config.devices.at(value.device).axes.contains(value.code))
+                    throw ConfigError(where + " requires declared output axis " + value.device + ":" +
+                                      std::to_string(value.code));
+            } else if (binding.input.kind == ControlKind::AbsoluteAxis) {
+                throw ConfigError(where + " absolute-axis inputs require axis actions");
+            }
+        }, action);
     }
     for (const auto& mode : binding.modes)
         if (!contains(config.modes, mode))
@@ -239,6 +327,7 @@ void validate_binding_precedence(const Config& config, std::size_t index) {
         if (other.input.device == binding.input.device &&
             other.input.kind == binding.input.kind &&
             other.input.code == binding.input.code &&
+            other.input.direction == binding.input.direction &&
             other.modifiers.size() == binding.modifiers.size() &&
             overlaps(other.modes, binding.modes)) {
             throw ConfigError("bindings[" + std::to_string(index) + "] conflicts with bindings[" +

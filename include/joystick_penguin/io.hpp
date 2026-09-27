@@ -10,13 +10,15 @@ namespace joystick_penguin {
 // A backend produces ordered events for one configured physical device. Hat axes
 // are ordinary ABS_HAT* events. Sync loss and disconnection are explicit so the
 // future engine can clear owned outputs instead of acting on stale state.
-enum class InputEventKind { Button, AbsoluteAxis, SyncLost, Disconnected };
+enum class InputEventKind { Button, AbsoluteAxis, AxisBaseline, FrameEnd, SyncLost, Disconnected };
 
 struct InputEvent {
     std::string device;
     InputEventKind kind;
     int code = 0;
     int value = 0;
+    int minimum = 0; // Physical EV_ABS range for axis events and baselines.
+    int maximum = 0;
 };
 
 class InputBackend {

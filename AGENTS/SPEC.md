@@ -158,11 +158,25 @@ direction-to-direction movement must release or update the previous direction
 correctly. The two axes of a hat must support diagonals without interfering
 with each other.
 
-Ordinary continuously reported axes should update their selected outputs
-predictably. For any modifier-dependent axis binding, specify when its gesture
-starts and ends before implementation; a non-centering throttle must not be
-assumed to return to zero. Avoid changing an active axis's destination merely
-because a modifier changed.
+Absolute axes use **live modifier routing**, deliberately distinct from
+captured button and hat gestures. Cache the latest physical position, including
+before the first movement. While a modifier is held, an eligible modified axis
+binding receives new values; pressing or releasing a modifier immediately
+removes this axis's ownership from its old virtual destination and sends the
+cached position to the newly selected destination in one coherent output frame.
+When no destination is selected, remove ownership without asserting a new one.
+This policy also applies to non-centering throttles: they need no assumed
+return-to-zero point to change destinations. On initial connection or
+reconnection, cache physical axis positions without asserting outputs solely
+because the device appeared; the next physical axis or modifier event may
+activate routing.
+
+Virtual absolute outputs must declare valid ranges and neutral values. Hats
+use a ternary range and zero neutral. If several physical actions drive the
+same virtual absolute control, the last updated active owner wins; removing
+that owner restores the most recently updated remaining owner's value, or the
+configured neutral value when none remain. This applies independently to each
+hat axis so diagonal movement is possible without interference.
 
 ### 4.4 Tap and hold
 
@@ -236,6 +250,22 @@ their number nor their names are built-in limits.
 For one action, `action: {...}` is shorthand. To assert several independent
 outputs from a single captured gesture, use a nonempty `actions: [{...}, {...}]`
 list instead. A binding must specify exactly one of `action` or `actions`.
+Axis input codes and virtual output axis codes use Linux `EV_ABS` numbers.
+Directional hat inputs identify the hat component and its sign, while hat
+outputs advertise `ABS_HAT*` axes with the ternary range. Non-hat virtual
+axis outputs declare a minimum, maximum, and neutral value, for example:
+
+```yaml
+devices:
+  virtual_stick:
+    kind: uinput
+    preset: joystick
+    axes:
+      0: {min: -32768, max: 32767, neutral: 0}
+      2: {min: 0, max: 255, neutral: 0}
+```
+
+See `examples/controls.yaml` for complete physical hat and axis bindings.
 
 The configuration loader must validate device references, modifier names,
 input and output capabilities, mode references, and ambiguous binding

@@ -3,9 +3,12 @@
 #include "joystick_penguin/io.hpp"
 
 #include <chrono>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
+#include <variant>
 
 using namespace joystick_penguin;
 
@@ -64,11 +67,18 @@ void run() {
     const auto config = load_config(profile);
     const auto example = load_config_file(EXAMPLE_PROFILE);
     const auto gesture_example = load_config_file(GESTURES_PROFILE);
+    const auto controls_example = load_config_file(CONTROLS_PROFILE);
     check(example.devices.size() == 2 && example.bindings.size() == 2,
           "example profile should load from disk");
     check(gesture_example.modifiers.at("shift").code == 292 &&
           gesture_example.bindings.size() == 5 && gesture_example.bindings[4].actions.size() == 2,
           "manual gesture profile should load from disk");
+    check(controls_example.devices.at("virtual_stick").axes.at(2).maximum == 255 &&
+          controls_example.bindings.size() == 7,
+          "manual control coverage profile should load from disk");
+    GestureEngine control_demo(controls_example);
+    check(control_demo.process({"right", InputEventKind::AbsoluteAxis, 16, -1, -1, 1}).size() == 1,
+          "manual hat mapping is runnable");
     GestureEngine demo(gesture_example);
     check(demo.process({"physical", InputEventKind::Button, 288, 1}).size() == 1,
           "manual gesture profile is runnable");
@@ -83,7 +93,8 @@ void run() {
     check(!config.devices.at("shared").grab, "explicit shared device");
     check(config.initial_mode == "default", "initial mode");
     check(config.modifiers.at("shift").code == 307, "modifier code");
-    check(config.bindings[0].actions.size() == 1 && config.bindings[0].actions[0].code == 305,
+    check(config.bindings[0].actions.size() == 1 &&
+          std::get<ButtonAction>(config.bindings[0].actions[0]).code == 305,
           "output code");
     check(config.bindings[1].modifiers == std::vector<std::string>{"shift"},
           "modified binding");
@@ -93,7 +104,8 @@ void run() {
         "actions:\n      - {type: button, device: virtual, button: 305}\n"
         "      - {type: button, device: virtual, button: 307}");
     const auto multi = load_config(multiple_actions);
-    check(multi.bindings[0].actions.size() == 2 && multi.bindings[0].actions[1].code == 307,
+    check(multi.bindings[0].actions.size() == 2 &&
+          std::get<ButtonAction>(multi.bindings[0].actions[1]).code == 307,
           "action list and original shorthand decode to the same typed representation");
 
     rejected(replace(profile, "version: 1", "version: 2"), "unsupported profile version");
@@ -107,11 +119,31 @@ void run() {
              "unknown mode");
     rejected(replace(profile, "modifiers: [shift]\n    action:", "action:"),
              "conflicts with bindings[0]");
-    rejected(replace(profile, "button: 304", "button: 4"), "event-code range");
+    rejected(replace(profile, "button: 304", "button: 4"), "out of permitted range");
     rejected(replace(profile, "type: button, device: virtual", "type: macro, device: virtual"),
              "unsupported");
     rejected(replace(profile, "grab: false", "grab: maybe"), "must be a boolean");
     rejected(replace(profile, "version: 1", "version: 1\nversion: 1"), "duplicate key");
+    std::ifstream controls_file(CONTROLS_PROFILE);
+    check(controls_file.good(), "read control coverage profile for validation checks");
+    const std::string controls_text(std::istreambuf_iterator<char>{controls_file}, {});
+    rejected(replace(controls_text, "0: {min: -32768, max: 32767, neutral: 0}",
+             "0: {min: -32768, max: 32767, neutral: 50000}"),
+             "min <= neutral <= max");
+    rejected(replace(controls_text, "action: {type: axis, device: virtual_stick, axis: 0}",
+             "action: {type: axis, device: virtual_stick, axis: 3}"),
+             "requires declared output axis");
+    rejected(replace(controls_text, "input: {device: left, axis: 0}",
+             "input: {device: left, axis: 16}"), "hat axis; use 'hat'");
+    rejected(replace(controls_text, "hat: {axis: 16, direction: -1}",
+             "hat: {axis: 16, direction: 0}"), "must be -1 or 1");
+    rejected(replace(controls_text, "hat: {axis: 16, direction: -1}",
+             "hat: {axis: 0, direction: -1}"), "ABS_HAT* axis code");
+    rejected(replace(controls_text, "action: {type: axis, device: virtual_stick, axis: 0}",
+             "action: {type: button, device: virtual_hat, button: 288}"),
+             "absolute-axis inputs require axis actions");
+    rejected(replace(controls_text, "2: {min: 0, max: 255, neutral: 0}",
+             "16: {min: -1, max: 1, neutral: 0}"), "hat axis; use 'hat'");
     rejected(replace(profile, "action: {type: button, device: virtual, button: 305}",
              "actions: []"), "actions cannot be empty");
     rejected(replace(profile, "action: {type: button, device: virtual, button: 305}",
@@ -120,7 +152,7 @@ void run() {
              "exactly one of 'action' or 'actions'");
     rejected(replace(multiple_actions, "- {type: button, device: virtual, button: 307}",
              "- {type: button, device: virtual, button: 305}"),
-             "repeats output button");
+             "repeats output control");
     rejected(replace(multiple_actions, "- {type: button, device: virtual, button: 307}",
              "- {type: button, device: missing, button: 307}"),
              "unknown or wrong-kind device");

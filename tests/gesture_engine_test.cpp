@@ -38,8 +38,10 @@ InputEvent up(const std::string& device, int code) {
 
 Binding bind(const std::string& device, int code, std::vector<std::string> modifiers,
              std::vector<ButtonAction> actions) {
+    std::vector<Action> outputs;
+    for (auto& action : actions) outputs.emplace_back(std::move(action));
     return {{device, ControlKind::Button, code}, {"default"},
-            std::move(modifiers), std::move(actions)};
+            std::move(modifiers), std::move(outputs)};
 }
 
 Config profile() {
