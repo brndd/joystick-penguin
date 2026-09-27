@@ -104,25 +104,37 @@ cancellation policy: active bindings invalid in the new mode are cleaned up
 immediately. A physical control still held across that change does not
 automatically activate a replacement binding.
 
+A modifier control may also have its own output binding. Select that binding
+from the modifier state **before** its own press is added to the held set;
+subsequent presses see the newly held modifier. A binding cannot require a
+modifier held by its own physical input, since it could never become eligible
+on that input's initial press. The modifier's own button output activates on
+press; tap-versus-hold behavior is a later milestone.
+
 ### 4.2 Gesture capture
 
 When a physical button is initially pressed:
 
 1. Take a consistent snapshot of mode and modifier state.
-2. Select the eligible binding or bindings according to documented precedence.
+2. Select the eligible binding according to documented precedence.
 3. Record the selected actions against that physical press.
 4. Deliver its eventual release to those recorded actions, regardless of
    subsequent modifier changes.
 
 A modifier-specific binding takes precedence over an ordinary binding for the
-same physical input and mode. An ordinary binding is the fallback if no
-eligible modified binding exists. Equally specific conflicting bindings must
-produce a configuration error rather than depend on YAML order.
+same physical input and mode. Among eligible bindings, the one requiring the
+most held modifiers wins. An ordinary binding is the fallback if no eligible
+modified binding exists. Equally specific conflicting bindings must produce a
+configuration error rather than depend on YAML order.
 Independently intended multiple actions should be expressed as actions in one
 binding.
 
 Key-repeat events must not be treated as new presses. Releasing a modifier
 must not activate an ordinary mapping for a control that was already held.
+Track every physical down, including one with no eligible binding: changing
+modifiers while it is held must not retroactively give it an output, even if a
+duplicate down event arrives. Only a release followed by a fresh press may
+select a different binding.
 
 **Required sequence:**
 
@@ -220,6 +232,10 @@ bindings:
 
 The two controllers in this example illustrate cross-device routing; neither
 their number nor their names are built-in limits.
+
+For one action, `action: {...}` is shorthand. To assert several independent
+outputs from a single captured gesture, use a nonempty `actions: [{...}, {...}]`
+list instead. A binding must specify exactly one of `action` or `actions`.
 
 The configuration loader must validate device references, modifier names,
 input and output capabilities, mode references, and ambiguous binding

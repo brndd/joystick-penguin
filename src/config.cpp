@@ -161,7 +161,7 @@ ButtonAction parse_action(const YAML::Node& node, const std::string& where) {
 
 Binding parse_binding(const YAML::Node& node, std::size_t index) {
     const auto where = "bindings[" + std::to_string(index) + "]";
-    keys(node, where, {"input", "modes", "modifiers", "action"});
+    keys(node, where, {"input", "modes", "modifiers", "action", "actions"});
     Binding binding;
     binding.input = input_control(required(node, "input", where), where + ".input");
     if (binding.input.kind != ControlKind::Button)
@@ -170,7 +170,19 @@ Binding parse_binding(const YAML::Node& node, std::size_t index) {
     if (binding.modes.empty()) throw ConfigError(where + ".modes cannot be empty");
     if (const auto modifiers = node["modifiers"])
         binding.modifiers = names(modifiers, where + ".modifiers");
-    binding.action = parse_action(required(node, "action", where), where + ".action");
+    const auto action = node["action"];
+    const auto actions = node["actions"];
+    if (static_cast<bool>(action) == static_cast<bool>(actions))
+        throw ConfigError(where + " requires exactly one of 'action' or 'actions'");
+    if (action) {
+        binding.actions.push_back(parse_action(action, where + ".action"));
+    } else {
+        expect_sequence(actions, where + ".actions");
+        if (actions.size() == 0) throw ConfigError(where + ".actions cannot be empty");
+        for (std::size_t i = 0; i < actions.size(); ++i)
+            binding.actions.push_back(parse_action(actions[i], where + ".actions[" +
+                                                   std::to_string(i) + "]"));
+    }
     return binding;
 }
 
@@ -200,13 +212,24 @@ void validate_binding(const Config& config, std::size_t index) {
     const auto& binding = config.bindings[index];
     const auto where = "bindings[" + std::to_string(index) + "]";
     check_device(config, binding.input.device, DeviceKind::Evdev, where + ".input");
-    check_device(config, binding.action.device, DeviceKind::Uinput, where + ".action");
+    std::set<std::pair<std::string, int>> targets;
+    for (const auto& action : binding.actions) {
+        check_device(config, action.device, DeviceKind::Uinput, where + ".actions");
+        if (!targets.emplace(action.device, action.code).second)
+            throw ConfigError(where + " repeats output button " + action.device + ":" +
+                              std::to_string(action.code));
+    }
     for (const auto& mode : binding.modes)
         if (!contains(config.modes, mode))
             throw ConfigError(where + " references unknown mode '" + mode + "'");
-    for (const auto& modifier : binding.modifiers)
-        if (!config.modifiers.count(modifier))
+    for (const auto& modifier : binding.modifiers) {
+        const auto found = config.modifiers.find(modifier);
+        if (found == config.modifiers.end())
             throw ConfigError(where + " references unknown modifier '" + modifier + "'");
+        if (found->second.device == binding.input.device &&
+            found->second.code == binding.input.code)
+            throw ConfigError(where + " cannot require its own modifier '" + modifier + "'");
+    }
 }
 
 void validate_binding_precedence(const Config& config, std::size_t index) {

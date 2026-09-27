@@ -160,8 +160,8 @@ void run() {
     config.devices.emplace("b", joystick_penguin::Device{DeviceKind::Evdev, session.b, false, ""});
     config.devices.emplace("virtual", joystick_penguin::Device{DeviceKind::Uinput, "", true, "joystick"});
     config.bindings = {
-        {{"a", ControlKind::Button, BTN_TRIGGER}, {"default"}, {}, {"virtual", BTN_TRIGGER}},
-        {{"b", ControlKind::Button, BTN_TRIGGER}, {"default"}, {}, {"virtual", BTN_TRIGGER}},
+        {{"a", ControlKind::Button, BTN_TRIGGER}, {"default"}, {}, {{"virtual", BTN_TRIGGER}}},
+        {{"b", ControlKind::Button, BTN_TRIGGER}, {"default"}, {}, {{"virtual", BTN_TRIGGER}}},
     };
 
     int pipefd[2];

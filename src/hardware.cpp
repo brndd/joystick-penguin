@@ -1,6 +1,6 @@
 #include "joystick_penguin/hardware.hpp"
 
-#include "joystick_penguin/button_router.hpp"
+#include "joystick_penguin/gesture_engine.hpp"
 #include "joystick_penguin/io.hpp"
 
 #include <libevdev/libevdev-uinput.h>
@@ -198,10 +198,12 @@ public:
             if (const int rc = libevdev_enable_event_code(description.get(), EV_KEY, BTN_JOYSTICK, nullptr);
                 rc < 0) return std::unexpected(error_text(label + " capabilities", -rc));
             for (const auto& binding : config.bindings) {
-                if (binding.action.device != name) continue;
-                if (const int rc = libevdev_enable_event_code(description.get(), EV_KEY,
-                                                               binding.action.code, nullptr); rc < 0)
-                    return std::unexpected(error_text(label + " capabilities", -rc));
+                for (const auto& action : binding.actions) {
+                    if (action.device != name) continue;
+                    if (const int rc = libevdev_enable_event_code(description.get(), EV_KEY,
+                                                                   action.code, nullptr); rc < 0)
+                        return std::unexpected(error_text(label + " capabilities", -rc));
+                }
             }
             libevdev_uinput* output = nullptr;
             if (const int rc = libevdev_uinput_create_from_device(description.get(),
@@ -240,7 +242,7 @@ private:
 } // namespace
 
 int run_hardware(const Config& config) {
-    ButtonRouter router(config);
+    GestureEngine engine(config);
     UinputOutput output;
     if (const auto result = output.create(config); !result) {
         std::cerr << result.error() << '\n';
@@ -255,6 +257,8 @@ int run_hardware(const Config& config) {
         std::set<int> codes;
         for (const auto& binding : config.bindings)
             if (binding.input.device == name) codes.insert(binding.input.code);
+        for (const auto& entry : config.modifiers)
+            if (entry.second.device == name) codes.insert(entry.second.code);
         inputs.emplace(name, std::make_unique<EvdevInput>(name, device.path, device.grab, std::move(codes)));
     }
 
@@ -307,7 +311,7 @@ int run_hardware(const Config& config) {
                 const auto result = input.read_events();
                 if (result) {
                     for (const auto& event : *result) {
-                        if (const auto written = output.write_frame(router.process(event)); !written) {
+                        if (const auto written = output.write_frame(engine.process(event)); !written) {
                             std::cerr << written.error() << '\n';
                             status = 1;
                             stopping = 1;
@@ -321,7 +325,7 @@ int run_hardware(const Config& config) {
             }
             if (fds[index].revents & (POLLERR | POLLHUP | POLLNVAL)) lost = true;
             if (lost) {
-                if (const auto written = output.write_frame(router.process(
+                if (const auto written = output.write_frame(engine.process(
                         {input.name(), InputEventKind::Disconnected})); !written) {
                     std::cerr << written.error() << '\n';
                     status = 1;
@@ -333,7 +337,7 @@ int run_hardware(const Config& config) {
             if (stopping) break;
         }
     }
-    if (const auto result = output.write_frame(router.release_all()); !result) {
+    if (const auto result = output.write_frame(engine.release_all()); !result) {
         std::cerr << result.error() << '\n';
         status = 1;
     }

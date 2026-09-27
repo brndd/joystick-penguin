@@ -1,0 +1,36 @@
+# Replace the stable path and input codes with those of your controller.
+# On a VKB Gladiator: A=288 (BTN_TRIGGER), Shift=292 (BTN_TOP2),
+# and B=290 (BTN_THUMB2). 289 is the trigger's second stage.
+version: 1
+devices:
+  physical:
+    kind: evdev
+    path: /dev/input/by-id/example-event-joystick
+    grab: true
+  virtual:
+    kind: uinput
+    preset: joystick
+modes: {initial: default, names: [default]}
+modifiers:
+  shift:
+    input: {device: physical, button: 292}
+bindings:
+  - input: {device: physical, button: 288} # A: ordinary
+    modes: [default]
+    action: {type: button, device: virtual, button: 288}
+  - input: {device: physical, button: 288} # New A while shift is held
+    modes: [default]
+    modifiers: [shift]
+    action: {type: button, device: virtual, button: 292}
+  - input: {device: physical, button: 292} # Modifier's own output
+    modes: [default]
+    action: {type: button, device: virtual, button: 293}
+  - input: {device: physical, button: 290} # B: ordinary fallback
+    modes: [default]
+    action: {type: button, device: virtual, button: 290}
+  - input: {device: physical, button: 290} # B: modified, two actions
+    modes: [default]
+    modifiers: [shift]
+    actions:
+      - {type: button, device: virtual, button: 291}
+      - {type: button, device: virtual, button: 294}

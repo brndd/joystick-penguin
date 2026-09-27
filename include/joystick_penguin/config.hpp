@@ -34,7 +34,7 @@ struct Binding {
     Control input;
     std::vector<std::string> modes;
     std::vector<std::string> modifiers;
-    ButtonAction action;
+    std::vector<ButtonAction> actions;
 };
 
 struct Config {
