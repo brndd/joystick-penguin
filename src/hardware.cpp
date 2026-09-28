@@ -13,6 +13,7 @@
 #include <linux/uinput.h>
 #include <poll.h>
 #include <sys/stat.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -35,12 +36,92 @@ namespace joystick_penguin {
 namespace {
 
 volatile std::sig_atomic_t stopping = 0;
+volatile std::sig_atomic_t reload_requested = 0;
 
 void stop_signal(int) { stopping = 1; }
+void reload_signal(int) { reload_requested = 1; }
 
 std::string error_text(const std::string& context, int error) {
     return context + ": " + std::strerror(error);
 }
+
+struct InputRequirements {
+    std::set<int> keys;
+    std::set<int> axes;
+};
+
+InputRequirements input_requirements(const Config& config, const std::string& name) {
+    InputRequirements result;
+    for (const auto& binding : config.bindings)
+        if (binding.input.device == name) {
+            if (binding.input.kind == ControlKind::Button) result.keys.insert(binding.input.code);
+            else result.axes.insert(binding.input.code);
+        }
+    for (const auto& [modifier, control] : config.modifiers)
+        if (control.device == name) result.keys.insert(control.code);
+    return result;
+}
+
+std::set<int> advertised_buttons(const Config& config, const std::string& name) {
+    std::set<int> result;
+    for (int index = 1; index <= joystick_button_count; ++index)
+        result.insert(joystick_button_code(index));
+    auto collect = [&](const std::vector<Action>& actions) {
+        for (const auto& action : actions)
+            if (const auto* button = std::get_if<ButtonAction>(&action); button && button->device == name)
+                result.insert(button->code);
+    };
+    for (const auto& binding : config.bindings) {
+        collect(binding.actions);
+        if (binding.tap_hold) {
+            collect(binding.tap_hold->tap);
+            collect(binding.tap_hold->hold);
+        }
+    }
+    return result;
+}
+
+std::expected<void, std::string> virtual_devices_compatible(const Config& current, const Config& next) {
+    for (const auto& [name, device] : current.devices) {
+        if (device.kind != DeviceKind::Uinput) continue;
+        const auto found = next.devices.find(name);
+        if (found == next.devices.end() || found->second.kind != DeviceKind::Uinput)
+            return std::unexpected("virtual device '" + name + "' was removed or changed kind; restart required");
+        const auto& replacement = found->second;
+        if (device.preset != replacement.preset || device.axes != replacement.axes ||
+            device.vendor_id != replacement.vendor_id || device.product_id != replacement.product_id ||
+            device.bus != replacement.bus || device.virtual_name != replacement.virtual_name ||
+            advertised_buttons(current, name) != advertised_buttons(next, name))
+            return std::unexpected("virtual device '" + name + "' changed identity or capabilities; restart required");
+    }
+    for (const auto& [name, device] : next.devices)
+        if (device.kind == DeviceKind::Uinput &&
+            (!current.devices.contains(name) || current.devices.at(name).kind != DeviceKind::Uinput))
+            return std::unexpected("virtual device '" + name + "' was added; restart required");
+    return {};
+}
+
+class InteractiveTerminal {
+public:
+    explicit InteractiveTerminal(bool enabled) {
+        if (!enabled || !isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &saved_) < 0) return;
+        auto single_key = saved_;
+        single_key.c_lflag &= ~(ICANON | ECHO);
+        single_key.c_cc[VMIN] = 1;
+        single_key.c_cc[VTIME] = 0;
+        active_ = tcsetattr(STDIN_FILENO, TCSANOW, &single_key) == 0;
+    }
+    ~InteractiveTerminal() {
+        if (active_) tcsetattr(STDIN_FILENO, TCSANOW, &saved_);
+    }
+    InteractiveTerminal(const InteractiveTerminal&) = delete;
+    InteractiveTerminal& operator=(const InteractiveTerminal&) = delete;
+    bool active() const { return active_; }
+
+private:
+    termios saved_{};
+    bool active_ = false;
+};
 
 // libevdev does not own an input fd supplied to libevdev_new_from_fd().
 class EvdevInput final : public InputBackend {
@@ -57,6 +138,31 @@ public:
     dev_t node_id() const { return node_id_; }
     const std::string& name() const { return name_; }
     bool connected() const { return fd_ >= 0; }
+
+    std::expected<void, std::string> validate_configuration(
+        const std::set<int>& keys, const std::set<int>& axes) const {
+        if (!connected()) return {};
+        if (const auto result = resolve_keys(keys); !result) return std::unexpected(result.error());
+        return validate_axes(axes);
+    }
+
+    std::expected<void, std::string> reconfigure(std::set<int> keys, std::set<int> axes) {
+        codes_ = std::move(keys);
+        axes_ = std::move(axes);
+        original_keys_.reset(); // The profile may watch a different set of controls.
+        if (!connected()) return {};
+        const auto resolved = resolve_keys(codes_);
+        if (!resolved) return std::unexpected(resolved.error());
+        resolved_keys_ = *resolved;
+        pending_frame_.clear();
+        if (const auto drained = drain_and_sync(); !drained) {
+            close_device();
+            return drained;
+        }
+        suppress_held();
+        original_keys_ = resolved_keys_;
+        return {};
+    }
 
     std::expected<void, std::string> connect() {
         const int fd = ::open(path_.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
@@ -81,46 +187,12 @@ public:
                                libevdev_get_uniq(dev_) ? libevdev_get_uniq(dev_) : ""};
         if (identity_ && *identity_ != current)
             return fail(path_ + " now points to a different device identity");
-        resolved_keys_.clear();
-        for (const int code : codes_)
-            if (code > 0) {
-                if (!libevdev_has_event_code(dev_, EV_KEY, code))
-                    return fail(path_ + " lacks configured EV_KEY code " + std::to_string(code));
-                resolved_keys_.emplace(code, code);
-            }
-        // Match the joystick ordering used by SDL: joystick/gamepad codes
-        // first, then BTN_MISC codes below BTN_JOYSTICK. KEY_MAX is skipped by
-        // current SDL and Wine; it remains available via button_code.
-        int index = 0;
-        auto enumerate = [&](int first, int last) -> std::expected<void, std::string> {
-            for (int code = first; code < last; ++code) {
-                if (!libevdev_has_event_code(dev_, EV_KEY, code)) continue;
-                ++index;
-                if (!codes_.contains(button_index_key(index))) continue;
-                if (!resolved_keys_.emplace(code, button_index_key(index)).second)
-                    return std::unexpected(path_ + " button " + std::to_string(index) +
-                                           " conflicts with configured button_code " + std::to_string(code));
-            }
-            return {};
-        };
-        if (const auto result = enumerate(BTN_JOYSTICK, KEY_MAX); !result) return fail(result.error());
-        if (const auto result = enumerate(BTN_MISC, BTN_JOYSTICK); !result) return fail(result.error());
-        for (const int code : codes_)
-            if (code < 0 && !std::any_of(resolved_keys_.begin(), resolved_keys_.end(),
-                [code](const auto& entry) { return entry.second == code; }))
-                return fail(path_ + " has no joystick button " + std::to_string(-code));
+        const auto resolved = resolve_keys(codes_);
+        if (!resolved) return fail(resolved.error());
+        resolved_keys_ = *resolved;
         if (original_keys_ && *original_keys_ != resolved_keys_)
             return fail(path_ + " button layout changed since the first connection");
-        for (const int code : axes_) {
-            if (!libevdev_has_event_code(dev_, EV_ABS, code))
-                return fail(path_ + " lacks configured EV_ABS code " + std::to_string(code));
-            const auto* info = libevdev_get_abs_info(dev_, code);
-            if (!info || info->minimum >= info->maximum)
-                return fail(path_ + " has an invalid range for EV_ABS code " + std::to_string(code));
-            if (code >= ABS_HAT0X && code <= ABS_HAT3Y &&
-                (info->minimum != -1 || info->maximum != 1))
-                return fail(path_ + " requires a ternary range for hat axis " + std::to_string(code));
-        }
+        if (const auto result = validate_axes(axes_); !result) return fail(result.error());
         if (grab_) {
             if (const int rc = libevdev_grab(dev_, LIBEVDEV_GRAB); rc < 0)
                 return fail(error_text(path_ + " EVIOCGRAB failed", -rc));
@@ -129,22 +201,7 @@ public:
 
         // libevdev's initial snapshot can already include queued events. Drain
         // them without forwarding, then resynchronize and suppress held keys.
-        input_event event{};
-        while (true) {
-            const int rc = libevdev_next_event(dev_, LIBEVDEV_READ_FLAG_NORMAL, &event);
-            if (rc == -EAGAIN) break;
-            if (rc == LIBEVDEV_READ_STATUS_SYNC) {
-                if (const auto result = sync(); !result) return fail(result.error());
-            } else if (rc < 0) {
-                return fail(error_text(path_ + " initial read", -rc));
-            }
-        }
-        const int rc = libevdev_next_event(dev_, LIBEVDEV_READ_FLAG_FORCE_SYNC, &event);
-        if (rc == LIBEVDEV_READ_STATUS_SYNC) {
-            if (const auto result = sync(); !result) return fail(result.error());
-        } else if (rc < 0 && rc != -EAGAIN) {
-            return fail(error_text(path_ + " initial sync", -rc));
-        }
+        if (const auto result = drain_and_sync(); !result) return fail(result.error());
         suppress_held();
         original_keys_ = resolved_keys_;
         identity_ = current;
@@ -217,6 +274,71 @@ private:
         std::string unique;
         bool operator==(const Identity&) const = default;
     };
+
+    std::expected<std::map<int, int>, std::string> resolve_keys(const std::set<int>& requested) const {
+        std::map<int, int> resolved;
+        for (const int code : requested)
+            if (code > 0) {
+                if (!libevdev_has_event_code(dev_, EV_KEY, code))
+                    return std::unexpected(path_ + " lacks configured EV_KEY code " + std::to_string(code));
+                resolved.emplace(code, code);
+            }
+        // Match SDL's joystick ordering. KEY_MAX is skipped by current SDL
+        // and Wine; explicit button_code can still select it.
+        int index = 0;
+        auto enumerate = [&](int first, int last) -> std::expected<void, std::string> {
+            for (int code = first; code < last; ++code) {
+                if (!libevdev_has_event_code(dev_, EV_KEY, code)) continue;
+                ++index;
+                if (!requested.contains(button_index_key(index))) continue;
+                if (!resolved.emplace(code, button_index_key(index)).second)
+                    return std::unexpected(path_ + " button " + std::to_string(index) +
+                                           " conflicts with configured button_code " + std::to_string(code));
+            }
+            return {};
+        };
+        if (const auto result = enumerate(BTN_JOYSTICK, KEY_MAX); !result)
+            return std::unexpected(result.error());
+        if (const auto result = enumerate(BTN_MISC, BTN_JOYSTICK); !result)
+            return std::unexpected(result.error());
+        for (const int code : requested)
+            if (code < 0 && !std::any_of(resolved.begin(), resolved.end(),
+                [code](const auto& entry) { return entry.second == code; }))
+                return std::unexpected(path_ + " has no joystick button " + std::to_string(-code));
+        return resolved;
+    }
+
+    std::expected<void, std::string> validate_axes(const std::set<int>& axes) const {
+        for (const int code : axes) {
+            if (!libevdev_has_event_code(dev_, EV_ABS, code))
+                return std::unexpected(path_ + " lacks configured EV_ABS code " + std::to_string(code));
+            const auto* info = libevdev_get_abs_info(dev_, code);
+            if (!info || info->minimum >= info->maximum)
+                return std::unexpected(path_ + " has an invalid range for EV_ABS code " + std::to_string(code));
+            if (code >= ABS_HAT0X && code <= ABS_HAT3Y &&
+                (info->minimum != -1 || info->maximum != 1))
+                return std::unexpected(path_ + " requires a ternary range for hat axis " + std::to_string(code));
+        }
+        return {};
+    }
+
+    std::expected<void, std::string> drain_and_sync() {
+        input_event event{};
+        while (true) {
+            const int rc = libevdev_next_event(dev_, LIBEVDEV_READ_FLAG_NORMAL, &event);
+            if (rc == -EAGAIN) break;
+            if (rc == LIBEVDEV_READ_STATUS_SYNC) {
+                if (const auto result = sync(); !result) return result;
+            } else if (rc < 0) {
+                return std::unexpected(error_text(path_ + " initial read", -rc));
+            }
+        }
+        const int rc = libevdev_next_event(dev_, LIBEVDEV_READ_FLAG_FORCE_SYNC, &event);
+        if (rc == LIBEVDEV_READ_STATUS_SYNC) return sync();
+        if (rc < 0 && rc != -EAGAIN)
+            return std::unexpected(error_text(path_ + " initial sync", -rc));
+        return {};
+    }
 
     std::expected<void, std::string> sync() {
         input_event event{};
@@ -359,50 +481,49 @@ private:
 
 } // namespace
 
-int run_hardware(const Config& config) {
-    GestureEngine engine(config);
+int run_hardware(const Config& config, const std::string& profile_path) {
+    Config active_config = config;
+    auto engine = std::make_unique<GestureEngine>(active_config);
     UinputOutput output;
-    if (const auto result = output.create(config); !result) {
+    if (const auto result = output.create(active_config); !result) {
         std::cerr << result.error() << '\n';
         return 1;
     }
-    OutputFrames frames(output, config);
-    std::cerr << "Initial mode: " << engine.mode() << '\n';
+    OutputFrames frames(output, active_config);
+    std::cerr << "Initial mode: " << engine->mode() << '\n';
 
     auto report_mode_change = [&](const std::string& previous) {
-        if (engine.mode() != previous)
-            std::cerr << "Mode changed: " << previous << " -> " << engine.mode() << '\n';
+        if (engine->mode() != previous)
+            std::cerr << "Mode changed: " << previous << " -> " << engine->mode() << '\n';
     };
     auto process = [&](const InputEvent& event) {
-        const std::string previous = engine.mode();
-        auto events = engine.process(event);
+        const std::string previous = engine->mode();
+        auto events = engine->process(event);
         report_mode_change(previous);
         return events;
     };
 
     std::map<std::string, std::unique_ptr<EvdevInput>> inputs;
-    for (const auto& [name, device] : config.devices) {
+    for (const auto& [name, device] : active_config.devices) {
         if (device.kind != DeviceKind::Evdev) continue;
         if (device.path.starts_with("/dev/input/event"))
             throw ConfigError(name + " must use a stable /dev/input/by-id or by-path link, not eventN");
-        std::set<int> codes, axes;
-        for (const auto& binding : config.bindings)
-            if (binding.input.device == name) {
-                if (binding.input.kind == ControlKind::Button) codes.insert(binding.input.code);
-                else axes.insert(binding.input.code);
-            }
-        for (const auto& entry : config.modifiers)
-            if (entry.second.device == name) codes.insert(entry.second.code);
+        auto [codes, axes] = input_requirements(active_config, name);
         inputs.emplace(name, std::make_unique<EvdevInput>(name, device.path, device.grab,
                                                            std::move(codes), std::move(axes)));
     }
 
     stopping = 0;
+    reload_requested = 0;
     std::signal(SIGINT, stop_signal);
     std::signal(SIGTERM, stop_signal);
+    if (!profile_path.empty()) std::signal(SIGHUP, reload_signal);
+    InteractiveTerminal terminal(!profile_path.empty());
+    if (terminal.active()) std::cerr << "Press r to reload the profile\n";
     std::map<std::string, std::string> reported_errors;
     int status = 0;
-    while (!stopping) {
+    bool poll_terminal = terminal.active();
+    auto connect_inputs = [&](bool seed_baselines) {
         for (auto& [name, input] : inputs) {
             if (input->connected()) continue;
             auto result = input->connect();
@@ -417,13 +538,101 @@ int run_hardware(const Config& config) {
             }
             if (result) {
                 reported_errors.erase(name);
-                for (const auto& baseline : input->baselines()) process(baseline);
+                if (seed_baselines)
+                    for (const auto& baseline : input->baselines()) process(baseline);
                 std::cerr << "Connected " << name << '\n';
             } else if (reported_errors[name] != result.error()) {
                 reported_errors[name] = result.error();
                 std::cerr << name << ": " << result.error() << " (retrying)\n";
             }
         }
+    };
+    auto reload_profile = [&]() -> std::expected<void, std::string> {
+        if (profile_path.empty()) return std::unexpected("no profile path was provided");
+
+        // Build the replacement and check everything that can be checked
+        // without affecting the running mappings or virtual devices.
+        Config replacement;
+        std::unique_ptr<GestureEngine> new_engine;
+        try {
+            replacement = load_config_file(profile_path);
+            new_engine = std::make_unique<GestureEngine>(replacement);
+        } catch (const ConfigError& error) {
+            return std::unexpected(error.what());
+        }
+        if (const auto compatible = virtual_devices_compatible(active_config, replacement); !compatible)
+            return compatible;
+
+        std::map<std::string, std::unique_ptr<EvdevInput>> staged_inputs;
+        for (const auto& [name, device] : replacement.devices) {
+            if (device.kind != DeviceKind::Evdev) continue;
+            if (device.path.starts_with("/dev/input/event"))
+                return std::unexpected(name + " must use a stable by-id or by-path link, not eventN");
+            auto [keys, axes] = input_requirements(replacement, name);
+            const auto existing = inputs.find(name);
+            const auto original = active_config.devices.find(name);
+            if (existing != inputs.end() && original != active_config.devices.end() &&
+                original->second.kind == DeviceKind::Evdev &&
+                original->second.path == device.path && original->second.grab == device.grab) {
+                if (const auto checked = existing->second->validate_configuration(keys, axes); !checked)
+                    return checked;
+            } else {
+                staged_inputs.emplace(name, std::make_unique<EvdevInput>(
+                    name, device.path, device.grab, std::move(keys), std::move(axes)));
+            }
+        }
+
+        if (const auto written = frames.flush(); !written) {
+            stopping = 1;
+            status = 1;
+            return std::unexpected(written.error());
+        }
+        const auto previous = engine->mode();
+        frames.add(engine->release_all()); // Cancels pending taps without firing them.
+
+        std::map<std::string, std::unique_ptr<EvdevInput>> updated_inputs;
+        for (const auto& [name, device] : replacement.devices) {
+            if (device.kind != DeviceKind::Evdev) continue;
+            if (auto staged = staged_inputs.find(name); staged != staged_inputs.end()) {
+                updated_inputs.emplace(name, std::move(staged->second));
+            } else {
+                auto input = std::move(inputs.at(name));
+                auto [keys, axes] = input_requirements(replacement, name);
+                if (const auto changed = input->reconfigure(std::move(keys), std::move(axes)); !changed)
+                    std::cerr << name << ": " << changed.error() << " (retrying)\n";
+                updated_inputs.emplace(name, std::move(input));
+            }
+        }
+        inputs.swap(updated_inputs);
+        updated_inputs.clear(); // Release grabs for removed/repointed physical inputs.
+        engine.swap(new_engine);
+        active_config = std::move(replacement);
+        reported_errors.clear();
+        connect_inputs(false);
+
+        for (const auto& [name, input] : inputs) {
+            if (!input->connected()) continue;
+            const auto baselines = input->baselines();
+            for (const auto& baseline : baselines) engine->process(baseline);
+            for (const auto& baseline : baselines)
+                if (baseline.code < ABS_HAT0X || baseline.code > ABS_HAT3Y) {
+                    auto current = baseline;
+                    current.kind = InputEventKind::AbsoluteAxis;
+                    frames.add(engine->process(current));
+                }
+        }
+        report_mode_change(previous);
+        if (const auto written = frames.flush(); !written) {
+            stopping = 1;
+            status = 1;
+            return std::unexpected(written.error());
+        }
+        std::cerr << "Reloaded profile: " << profile_path << " (mode: " << engine->mode() << ")\n";
+        return {};
+    };
+
+    while (!stopping) {
+        connect_inputs(true);
 
         std::vector<pollfd> fds;
         std::vector<EvdevInput*> ready;
@@ -432,28 +641,33 @@ int run_hardware(const Config& config) {
             fds.push_back({input->descriptor(), POLLIN, 0});
             ready.push_back(input.get());
         }
+        const auto terminal_index = fds.size();
+        if (poll_terminal) fds.push_back({STDIN_FILENO, POLLIN, 0});
         int timeout = 500;
-        if (const auto deadline = engine.next_deadline()) {
+        if (const auto deadline = engine->next_deadline()) {
             const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
                 *deadline - std::chrono::steady_clock::now()).count();
             timeout = static_cast<int>(std::clamp<long long>(remaining + 1, 0, 500));
         }
-        const int rc = ::poll(fds.data(), fds.size(), timeout);
+        int rc = ::poll(fds.data(), fds.size(), timeout);
         if (rc < 0) {
-            if (errno == EINTR) continue;
-            std::cerr << error_text("poll", errno) << '\n';
-            status = 1;
-            break;
+            if (errno == EINTR) rc = 0;
+            else {
+                std::cerr << error_text("poll", errno) << '\n';
+                status = 1;
+                break;
+            }
         }
-        const std::string previous_mode = engine.mode();
-        frames.add(engine.process_timers());
+        if (stopping) break;
+        const std::string previous_mode = engine->mode();
+        frames.add(engine->process_timers());
         report_mode_change(previous_mode);
         if (const auto written = frames.flush(); !written) {
             std::cerr << written.error() << '\n';
             status = 1;
             break;
         }
-        for (std::size_t index = 0; index < fds.size(); ++index) {
+        for (std::size_t index = 0; index < ready.size(); ++index) {
             if (!fds[index].revents) continue;
             auto& input = *ready[index];
             bool lost = false;
@@ -472,14 +686,14 @@ int run_hardware(const Config& config) {
                         }
                         if (event.kind == InputEventKind::FrameEnd) continue;
                         frames.add(process(event));
-                        if (engine.has_tap_release()) {
+                        if (engine->has_tap_release()) {
                             if (const auto written = frames.flush(); !written) {
                                 std::cerr << written.error() << '\n';
                                 status = 1;
                                 stopping = 1;
                                 break;
                             }
-                            frames.add(engine.finish_tap());
+                            frames.add(engine->finish_tap());
                             if (const auto written = frames.flush(); !written) {
                                 std::cerr << written.error() << '\n';
                                 status = 1;
@@ -521,8 +735,26 @@ int run_hardware(const Config& config) {
             }
             if (stopping) break;
         }
+        if (!stopping && poll_terminal && fds[terminal_index].revents) {
+            if (fds[terminal_index].revents & POLLIN) {
+                char keys[32];
+                const auto count = ::read(STDIN_FILENO, keys, sizeof(keys));
+                if (count > 0) {
+                    for (ssize_t i = 0; i < count; ++i)
+                        if (keys[i] == 'r' || keys[i] == 'R') reload_requested = 1;
+                } else if (count == 0 || errno != EINTR) {
+                    poll_terminal = false;
+                }
+            }
+            if (fds[terminal_index].revents & (POLLHUP | POLLERR | POLLNVAL)) poll_terminal = false;
+        }
+        if (!stopping && reload_requested) {
+            reload_requested = 0;
+            if (const auto result = reload_profile(); !result)
+                std::cerr << "Reload failed: " << result.error() << '\n';
+        }
     }
-    frames.add(engine.release_all());
+    frames.add(engine->release_all());
     if (const auto result = frames.flush(); !result) {
         std::cerr << result.error() << '\n';
         status = 1;

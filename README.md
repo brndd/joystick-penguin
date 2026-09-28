@@ -42,6 +42,24 @@ releases. Stop the remapper with Ctrl+C. You need read access to the physical
 device and virtual event node, and write access to `/dev/uinput`. If a grab
 fails, close any other remapper using that physical device.
 
+## Reload a profile
+
+Save changes to the same profile file, then press **r** in the remapper's
+terminal (no Enter needed) or send `kill -HUP <remapper-pid>` from another
+terminal. Single-key input is enabled automatically when stdin is a terminal;
+its settings are restored when the remapper exits. The console reports a
+successful reload or explains why it was rejected. An invalid profile leaves
+the running mappings active.
+
+Reload keeps the existing virtual joysticks and their event nodes alive. You
+may change bindings, modes, modifiers, timers, and physical controllers. New or
+repointed physical controllers that are absent will be retried. Changes to
+virtual devices' names, identity, advertised controls, or axis ranges require
+a restart. Successful reload starts in the profile's initial mode, releases
+held virtual buttons and hats, cancels pending taps, and resumes axes at their
+current positions. Release and press any physically held button again to
+activate its new mapping.
+
 Use `./build/joystick-penguin --check <profile.yaml>` to validate a profile
 without opening devices. A mode action is `{type: mode, mode: alternate}`.
 Button bindings may specify a positive `threshold_ms` and `tap` and/or `hold`

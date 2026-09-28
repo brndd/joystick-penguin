@@ -248,6 +248,14 @@ void cancellation_and_mode_routing() {
     check(!tap_only.next_deadline(), "tap-only timer is consumed");
     expect(tap_only.process(up("b", 313)), {}, "tap-only release after threshold does not tap");
     check(!tap_only.has_tap_release(), "no late tap pulse");
+
+    GestureEngine replaced(config, clock);
+    expect(replaced.process(down("b", 308)), {}, "pending tap/hold before replacement");
+    check(bool(replaced.next_deadline()), "replacement has pending timer");
+    expect(replaced.release_all(), {}, "replacing bindings cancels pending gesture without tapping");
+    clock.advance(500);
+    check(!replaced.next_deadline(), "replacement removes old deadline");
+    expect(replaced.process_timers(), {}, "replaced timer never fires");
 }
 
 } // namespace

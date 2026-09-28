@@ -16,6 +16,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -47,6 +48,12 @@ Device synthetic(const char* name) {
           "enabling synthetic button");
     check(libevdev_enable_event_code(description.get(), EV_KEY, BTN_TRIGGER_HAPPY1, nullptr) == 0,
           "enabling non-contiguous synthetic button");
+    input_absinfo range{};
+    range.value = 50;
+    range.minimum = 0;
+    range.maximum = 100;
+    check(libevdev_enable_event_code(description.get(), EV_ABS, ABS_X, &range) == 0,
+          "enabling synthetic axis");
     libevdev_uinput* raw = nullptr;
     const int rc = libevdev_uinput_create_from_device(description.get(),
                                                        LIBEVDEV_UINPUT_OPEN_MANAGED, &raw);
@@ -76,6 +83,13 @@ void extra_button(Device& device, int value) {
           "writing synthetic frame");
 }
 
+void axis(Device& device, int value) {
+    check(libevdev_uinput_write_event(device.get(), EV_ABS, ABS_X, value) == 0,
+          "writing synthetic axis");
+    check(libevdev_uinput_write_event(device.get(), EV_SYN, SYN_REPORT, 0) == 0,
+          "writing synthetic frame");
+}
+
 int open_reader(const std::string& path) {
     int last_error = 0;
     for (int attempt = 0; attempt < 100; ++attempt) {
@@ -90,9 +104,10 @@ int open_reader(const std::string& path) {
 }
 
 struct Session {
-    std::string dir, a, b;
+    std::string dir, a, b, profile, missing;
     pid_t child = -1;
     int log_fd = -1;
+    int terminal_fd = -1;
     std::string logs;
 
     ~Session() {
@@ -101,8 +116,11 @@ struct Session {
             waitpid(child, nullptr, 0);
         }
         if (log_fd >= 0) close(log_fd);
+        if (terminal_fd >= 0) close(terminal_fd);
         if (!a.empty()) unlink(a.c_str());
         if (!b.empty()) unlink(b.c_str());
+        if (!missing.empty()) unlink(missing.c_str());
+        if (!profile.empty()) unlink(profile.c_str());
         if (!dir.empty()) rmdir(dir.c_str());
     }
 
@@ -132,6 +150,36 @@ struct Session {
     }
 };
 
+void write_profile(const Session& session, int a_output, const std::string& b_path,
+                   int vendor = 1, int axis_target = ABS_X, int a_button = 1) {
+    std::ofstream file(session.profile, std::ios::trunc);
+    check(bool(file), "opening reload profile");
+    file << "version: 1\n"
+         << "devices:\n"
+         << "  a: {kind: evdev, path: " << session.a << "}\n"
+         << "  b: {kind: evdev, path: " << b_path << ", grab: false}\n"
+         << "  virtual: {kind: uinput, preset: joystick, vendor_id: " << vendor << "}\n"
+         << "modes: {initial: default, names: [default, alternate]}\n"
+         << "bindings:\n"
+         << "  - input: {device: a, button: " << a_button << "}\n"
+         << "    modes: [default, alternate]\n"
+         << "    action: {type: button, device: virtual, button: " << a_output << "}\n"
+         << "  - input: {device: a, button: 2}\n"
+         << "    modes: [default, alternate]\n"
+         << "    action: {type: button, device: virtual, button: 79}\n"
+         << "  - input: {device: b, button_code: 288}\n"
+         << "    modes: [default, alternate]\n"
+         << "    action: {type: button, device: virtual, button: 1}\n"
+         << "  - input: {device: b, button_code: 704}\n"
+         << "    modes: [default, alternate]\n"
+         << "    action: {type: mode, mode: alternate}\n"
+         << "  - input: {device: a, axis: 0}\n"
+         << "    modes: [default, alternate]\n"
+         << "    action: {type: axis, device: virtual, axis: " << axis_target << "}\n";
+    file.close();
+    check(bool(file), "writing reload profile");
+}
+
 bool next_button(int fd, int value, int milliseconds, int code = BTN_TRIGGER) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
     while (std::chrono::steady_clock::now() < deadline) {
@@ -148,6 +196,22 @@ bool next_button(int fd, int value, int milliseconds, int code = BTN_TRIGGER) {
     return false;
 }
 
+bool next_axis(int fd, int code, int value, int milliseconds) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now()).count();
+        pollfd pfd{fd, POLLIN, 0};
+        if (poll(&pfd, 1, static_cast<int>(remaining)) <= 0) continue;
+        input_event event{};
+        const auto count = read(fd, &event, sizeof(event));
+        if (count == sizeof(event) && event.type == EV_ABS && event.code == code &&
+            event.value == value) return true;
+        if (count < 0 && errno != EAGAIN) throw std::runtime_error("reading virtual axis");
+    }
+    return false;
+}
+
 void run() {
     Device input_a = synthetic("Joystick Penguin test input A");
     Device input_b = synthetic("Joystick Penguin test input B");
@@ -158,6 +222,8 @@ void run() {
     session.dir = created;
     session.a = session.dir + "/a-event-joystick";
     session.b = session.dir + "/b-event-joystick";
+    session.missing = session.dir + "/repointed-event-joystick";
+    session.profile = session.dir + "/profile.yaml";
     check(symlink(node(input_a).c_str(), session.a.c_str()) == 0, "linking first input");
     check(symlink(node(input_b).c_str(), session.b.c_str()) == 0, "linking second input");
 
@@ -166,32 +232,51 @@ void run() {
 
     Config config;
     config.initial_mode = "default";
-    config.modes = {"default"};
+    config.modes = {"default", "alternate"};
     config.devices.emplace("a", joystick_penguin::Device{DeviceKind::Evdev, session.a, true, ""});
     config.devices.emplace("b", joystick_penguin::Device{DeviceKind::Evdev, session.b, false, ""});
     config.devices.emplace("virtual", joystick_penguin::Device{DeviceKind::Uinput, "", true, "joystick"});
+    config.devices.at("virtual").axes = joystick_axes();
     config.bindings = {
-        {{"a", ControlKind::Button, -1}, {"default"}, {}, {ButtonAction{"virtual", BTN_TRIGGER}}},
-        {{"a", ControlKind::Button, button_index_key(2)}, {"default"}, {},
+        {{"a", ControlKind::Button, -1}, {"default", "alternate"}, {}, {ButtonAction{"virtual", BTN_TRIGGER}}},
+        {{"a", ControlKind::Button, button_index_key(2)}, {"default", "alternate"}, {},
          {ButtonAction{"virtual", joystick_button_code(79)}}},
-        {{"b", ControlKind::Button, BTN_TRIGGER}, {"default"}, {}, {ButtonAction{"virtual", BTN_TRIGGER}}},
+        {{"b", ControlKind::Button, BTN_TRIGGER}, {"default", "alternate"}, {},
+         {ButtonAction{"virtual", BTN_TRIGGER}}},
+        {{"b", ControlKind::Button, BTN_TRIGGER_HAPPY1}, {"default", "alternate"}, {},
+         {ModeAction{"alternate"}}},
+        {{"a", ControlKind::AbsoluteAxis, ABS_X}, {"default", "alternate"}, {},
+         {AxisAction{"virtual", ABS_X}}},
     };
+    write_profile(session, 1, session.b);
 
     int pipefd[2];
     check(pipe2(pipefd, O_CLOEXEC | O_NONBLOCK) == 0, "creating log pipe");
+    session.terminal_fd = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
+    check(session.terminal_fd >= 0 && grantpt(session.terminal_fd) == 0 &&
+          unlockpt(session.terminal_fd) == 0, "creating interactive terminal");
+    const char* terminal_path = ptsname(session.terminal_fd);
+    check(terminal_path != nullptr, "locating terminal slave");
+    const int terminal_slave = open(terminal_path, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    check(terminal_slave >= 0, "opening terminal slave");
     session.child = fork();
     check(session.child >= 0, "forking remapper");
     if (session.child == 0) {
         close(pipefd[0]);
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
+        close(session.terminal_fd);
+        dup2(terminal_slave, STDIN_FILENO);
+        close(terminal_slave);
         // The child must not keep the parent's synthetic uinput devices alive.
         close(libevdev_uinput_get_fd(input_a.get()));
         close(libevdev_uinput_get_fd(input_b.get()));
-        _exit(run_hardware(config));
+        _exit(run_hardware(config, session.profile));
     }
     close(pipefd[1]);
+    close(terminal_slave);
     session.log_fd = pipefd[0];
+    session.wait_for("Press r to reload the profile");
     session.wait_for("Connected a");
     session.wait_for("Connected b");
     const std::string prefix = "Created JP virtual at ";
@@ -243,6 +328,62 @@ void run() {
     button(replacement, 0);
     button(replacement, 1);
     check(next_button(output_fd, 1, 2000), "new press after reconnect works");
+    axis(replacement, 75);
+    check(next_axis(output_fd, ABS_X, 16383, 2000), "axis moves before reload");
+    extra_button(input_b, 1);
+    session.wait_for("Mode changed: default -> alternate");
+    extra_button(input_b, 0);
+
+    write_profile(session, 2, session.b, 2); // Changing a virtual identity requires a restart.
+    check(kill(session.child, SIGHUP) == 0, "requesting incompatible reload");
+    session.wait_for("Reload failed:");
+    button(replacement, 0);
+    check(next_button(output_fd, 0, 2000), "rejected reload retains held output");
+    button(replacement, 1);
+    check(next_button(output_fd, 1, 2000), "rejected reload retains original mapping");
+
+    {
+        std::ofstream invalid(session.profile, std::ios::trunc);
+        invalid << "version: 2\n";
+    }
+    check(kill(session.child, SIGHUP) == 0, "requesting malformed reload");
+    session.wait_for("Reload failed:", 2);
+    check(!next_button(output_fd, 0, 150), "malformed reload retains old output and gesture");
+
+    write_profile(session, 2, session.b, 1, ABS_X, 99);
+    check(kill(session.child, SIGHUP) == 0, "requesting unavailable physical control");
+    session.wait_for("Reload failed:", 3);
+    check(!next_button(output_fd, 0, 150), "hardware-incompatible reload retains old output");
+
+    write_profile(session, 2, session.b, 1, ABS_Y);
+    check(kill(session.child, SIGHUP) == 0, "requesting mapping reload");
+    session.wait_for("Reloaded profile:");
+    check(next_button(output_fd, 0, 2000), "reload clears captured old output on same virtual node");
+    session.wait_for("Mode changed: alternate -> default");
+    check(next_axis(output_fd, ABS_X, 0, 2000), "reload neutralizes old axis destination");
+    check(next_axis(output_fd, ABS_Y, 16383, 2000), "reload reroutes cached position without motion");
+    check(!next_button(output_fd, 1, 150, BTN_THUMB), "held input does not remap retroactively");
+    button(replacement, 0);
+    check(!next_button(output_fd, 0, 150, BTN_THUMB), "suppressed release does not emit output");
+    button(replacement, 1);
+    check(next_button(output_fd, 1, 2000, BTN_THUMB), "fresh press uses reloaded mapping");
+    button(replacement, 0);
+    check(next_button(output_fd, 0, 2000, BTN_THUMB), "reloaded output releases");
+
+    write_profile(session, 2, session.missing, 1, ABS_Y);
+    check(write(session.terminal_fd, "r", 1) == 1, "requesting physical repoint with one key");
+    session.wait_for("Reloaded profile:", 2);
+    button(replacement, 1);
+    check(next_button(output_fd, 1, 2000, BTN_THUMB),
+          "available controller works while repointed input is missing");
+    button(replacement, 0);
+    check(next_button(output_fd, 0, 2000, BTN_THUMB), "available controller still releases");
+    check(symlink(node(input_b).c_str(), session.missing.c_str()) == 0, "linking repointed input");
+    session.wait_for("Connected b", 2);
+    button(input_b, 1);
+    check(next_button(output_fd, 1, 2000), "repointed input resumes without virtual recreation");
+    button(input_b, 0);
+    check(next_button(output_fd, 0, 2000), "repointed input releases");
 
     kill(session.child, SIGINT);
     int status = 0;

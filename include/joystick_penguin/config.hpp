@@ -16,6 +16,7 @@ struct AxisRange {
     int minimum;
     int maximum;
     int neutral;
+    bool operator==(const AxisRange&) const = default;
 };
 
 struct Device {

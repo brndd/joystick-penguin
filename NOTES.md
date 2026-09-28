@@ -167,3 +167,24 @@ the three persistent modes. The profile retains the USB bus, device names,
 vendor and product IDs, but its virtual button ordinal layout is deliberately
 not identical to Joyful's. The source Joyful profile had already omitted Gremlin mouse
 acceleration and two macros; those omissions remain.
+
+## Live profile reload
+
+`run_hardware` retains the profile path. SIGHUP sets a signal-safe flag;
+interactive stdin is polled alongside evdev and timers, with noncanonical
+terminal input restored on exit. Both request a reload within the serialized
+event loop. Reload parses a candidate profile and constructs its gesture
+engine before changing the active mapping. A failed parse, an unsupported
+virtual-device shape change, or unavailable capabilities on a still-connected
+physical device leaves the old profile running.
+
+Virtual uinput objects and the `OutputFrames` buffer persist across reloads.
+Old gestures release their claims and cancel timers. Unchanged physical evdev
+backends update their watched controls without dropping their grabs; changed
+physical definitions close their old handles and retry new ones if necessary.
+Currently held buttons are suppressed until release, and hats are cached as
+inert baselines. The new engine starts in `modes.initial` and reasserts the
+current position of connected axes. Old-output cleanup and new-axis assertions
+are coalesced in a frame, preventing an unnecessary neutral step when an axis
+stays on the same destination. Virtual-device additions or changes to names,
+bus, IDs, axis ranges or button capabilities require a full restart.

@@ -32,7 +32,8 @@ The first usable release must support:
   loss, and shutdown; reconnecting a controller restores its mappings.
 
 A small manually authored YAML profile is sufficient for this milestone. TTS,
-live configuration reload, combos, mouse outputs, and macros are deferred.
+combos, mouse outputs, and macros are deferred. Mapping-only live reload is
+available without recreating virtual devices.
 
 ## 3. Input and output architecture
 
@@ -203,9 +204,13 @@ required on physical release, live axis rerouting on persistent-mode change,
 device loss, and orderly shutdown. It must not emit a release for an output
 the action never asserted.
 
-Live reload is deferred, but the engine's state model must permit a future
-reload to cancel active gestures and clear output ownership before replacing
-bindings.
+On live reload, fully validate the replacement before altering active mapping
+state. Keep virtual devices and their capabilities unchanged so games retain
+the same event nodes. Cancel captured gestures and pending timers, suppress
+held physical buttons until released, reset to the new initial mode, and route
+connected axes from their current positions. A rejected reload leaves the
+running mapping intact. A valid reload may change physical device definitions;
+unavailable inputs are retried independently.
 
 ## 5. Configuration format
 
@@ -359,7 +364,7 @@ deterministic output fixtures.
 6. **Usable manual profile:** configure representative controls and verify
    mappings across different physical and virtual devices.
 7. **Later milestones:** add uinput virtual keyboard, mouse, and gamepad outputs
-   alongside joysticks; expand rule types, add reload and TTS if needed,
+   alongside joysticks; expand rule types and add TTS if needed,
    investigate HIDRAW against real hardware, and build the Gremlin converter.
 
    Configure these as named virtual devices with appropriate capabilities:

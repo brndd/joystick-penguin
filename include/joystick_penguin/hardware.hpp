@@ -2,9 +2,11 @@
 
 #include "joystick_penguin/config.hpp"
 
+#include <string>
+
 namespace joystick_penguin {
 
-// Runs until SIGINT/SIGTERM. Reports startup or output failures via stderr.
-int run_hardware(const Config& config);
+// The optional path enables SIGHUP and interactive reload of the running profile.
+int run_hardware(const Config& config, const std::string& profile_path = {});
 
 } // namespace joystick_penguin

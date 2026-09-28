@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
                       << config.initial_mode << '\n';
             return 0;
         }
-        return joystick_penguin::run_hardware(config);
+        return joystick_penguin::run_hardware(config, argv[1]);
     } catch (const joystick_penguin::ConfigError& error) {
         std::cerr << "Profile error: " << error.what() << '\n';
         return 1;
