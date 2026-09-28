@@ -26,6 +26,7 @@ bindings:
   - input: {device: physical, button: 5}
     modes: [default, alternate]
     threshold_ms: 200
+    tap_ms: 50
     tap: {action: {type: button, device: virtual, button: 7}}
     hold:
       actions:

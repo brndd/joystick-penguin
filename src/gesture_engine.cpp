@@ -212,8 +212,13 @@ void GestureEngine::release_button(const Key& source, OutputChanges& changes) {
             gesture->second.hold_activated = true;
             activate(timing.hold, gesture->second.outputs, changes);
         }
-        if (!gesture->second.hold_activated)
+        if (!gesture->second.hold_activated) {
             activate(timing.tap, tap_outputs_, changes);
+            // Tap outputs must stay asserted long enough for consumers to see
+            // them, so they release on a timer rather than in the next frame.
+            if (!tap_outputs_.empty())
+                tap_deadline_ = clock_.now() + std::chrono::milliseconds(timing.tap_ms);
+        }
     }
     end_gesture(gesture->second, changes);
     down_.erase(gesture);
@@ -377,6 +382,7 @@ std::vector<OutputEvent> GestureEngine::release_all() {
     OutputChanges changes;
     for (const auto& claim : tap_outputs_) release_claim(claim, changes);
     tap_outputs_.clear();
+    tap_deadline_.reset();
     for (const auto& [source, gesture] : down_) end_gesture(gesture, changes);
     down_.clear();
     held_modifiers_.clear();
@@ -394,6 +400,7 @@ std::optional<Clock::TimePoint> GestureEngine::next_deadline() const {
     for (const auto& [source, gesture] : down_)
         if (gesture.deadline && !gesture.hold_activated && (!next || *gesture.deadline < *next))
             next = gesture.deadline;
+    if (tap_deadline_ && (!next || *tap_deadline_ < *next)) next = tap_deadline_;
     return next;
 }
 
@@ -412,13 +419,11 @@ std::vector<OutputEvent> GestureEngine::process_timers() {
         gesture.hold_activated = true;
         activate(bindings_[*gesture.binding_index].tap_hold->hold, gesture.outputs, changes);
     }
-    return changes.finish();
-}
-
-std::vector<OutputEvent> GestureEngine::finish_tap() {
-    OutputChanges changes;
-    for (const auto& claim : tap_outputs_) release_claim(claim, changes);
-    tap_outputs_.clear();
+    if (tap_deadline_ && now >= *tap_deadline_) {
+        for (const auto& claim : tap_outputs_) release_claim(claim, changes);
+        tap_outputs_.clear();
+        tap_deadline_.reset();
+    }
     return changes.finish();
 }
 

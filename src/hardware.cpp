@@ -687,21 +687,6 @@ int run_hardware(const Config& config, const std::string& profile_path, Speaker*
                         }
                         if (event.kind == InputEventKind::FrameEnd) continue;
                         frames.add(process(event));
-                        if (engine->has_tap_release()) {
-                            if (const auto written = frames.flush(); !written) {
-                                std::cerr << written.error() << '\n';
-                                status = 1;
-                                stopping = 1;
-                                break;
-                            }
-                            frames.add(engine->finish_tap());
-                            if (const auto written = frames.flush(); !written) {
-                                std::cerr << written.error() << '\n';
-                                status = 1;
-                                stopping = 1;
-                                break;
-                            }
-                        }
                         if (event.kind == InputEventKind::SyncLost) {
                             if (const auto written = frames.flush(); !written) {
                                 std::cerr << written.error() << '\n';

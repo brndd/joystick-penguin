@@ -26,8 +26,6 @@ public:
     std::vector<OutputEvent> process(const InputEvent& event);
     std::optional<Clock::TimePoint> next_deadline() const;
     std::vector<OutputEvent> process_timers();
-    bool has_tap_release() const { return !tap_outputs_.empty(); }
-    std::vector<OutputEvent> finish_tap();
     const std::string& mode() const { return mode_; }
     std::vector<OutputEvent> release_all();
 
@@ -97,6 +95,7 @@ private:
     std::uint64_t next_owner_ = 1;
     std::uint64_t next_update_ = 1;
     std::vector<OutputClaim> tap_outputs_;
+    std::optional<Clock::TimePoint> tap_deadline_;
 
     std::optional<std::size_t> select(const InputKey& source,
                                       const std::set<std::string>& modifiers,

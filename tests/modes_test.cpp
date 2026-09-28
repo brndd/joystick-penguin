@@ -113,6 +113,17 @@ void validation() {
     rejected(replace(profile, "threshold_ms: 200", "threshold_ms: 0"), "out of permitted range");
     rejected(replace(profile, "threshold_ms: 200", "threshold_ms: -1"), "out of permitted range");
     rejected(replace(profile, "threshold_ms: 200", "threshold_ms: 1.5"), "integer");
+    rejected(replace(profile, "threshold_ms: 200", "threshold_ms: 200\n    tap_ms: 0"),
+             "out of permitted range");
+    rejected(replace(profile, "threshold_ms: 200", "threshold_ms: 200\n    tap_ms: -5"),
+             "out of permitted range");
+    rejected(replace(profile, "threshold_ms: 200", "threshold_ms: 200\n    tap_ms: 1.5"),
+             "integer");
+    check(load_config(profile).bindings[4].tap_hold->tap_ms == 50, "default tap duration");
+    check(load_config(replace(profile, "threshold_ms: 200",
+                              "threshold_ms: 200\n    tap_ms: 75"))
+              .bindings[4].tap_hold->tap_ms == 75,
+          "explicit tap duration");
     rejected(replace(profile, "threshold_ms: 200", "threshold_ms: 200\n    action: {type: mode, mode: default}"),
              "cannot mix");
     rejected(replace(profile, "    tap: {action: {type: button, device: v, button_code: 310}}\n"
@@ -179,7 +190,7 @@ void run() {
     clock.advance(99);
     expect(engine.process(up("b", 313)), {{"v", axis, 1, 0}, {"v", axis, 0, 50}},
            "tap mode switch reroutes axes");
-    check(!engine.has_tap_release() && engine.mode() == "default", "mode-only tap has no output pulse");
+    check(engine.mode() == "default", "mode-only tap has no output pulse");
     expect(engine.process(up("a", 304)), {{"v", key, 305, 0}}, "alternate capture survives return");
 
     expect(engine.process(down("b", 308)), {}, "pending gesture survives mode change");
@@ -198,14 +209,18 @@ void run() {
     expect(engine.process(down("b", 308)), {}, "second pending press");
     clock.advance(50);
     frames.add(engine.process(up("b", 308)));
-    check(engine.has_tap_release(), "tap output awaits next frame");
+    check(engine.next_deadline() == clock.now() + std::chrono::milliseconds(50),
+          "tap output has a release deadline");
     check(bool(frames.flush()), "flush tap assertion");
-    frames.add(engine.finish_tap());
+    clock.advance(49);
+    expect(engine.process_timers(), {}, "tap stays asserted for its duration");
+    clock.advance(1);
+    frames.add(engine.process_timers());
     check(bool(frames.flush()), "flush tap release");
     check(sink.frames.size() == 2 && sink.frames[0].size() == 1 &&
           sink.frames[0][0].code == 310 && sink.frames[0][0].value == 1 &&
           sink.frames[1].size() == 1 && sink.frames[1][0].value == 0,
-          "tap pulses in separate frames");
+          "tap pulses in separate frames after the hold");
 
     expect(engine.process(down("b", 307)), {}, "modifier tap/hold press");
     expect(engine.process(down("b", 308)), {}, "timed gesture captures before modifier change");
@@ -247,7 +262,7 @@ void cancellation_and_mode_routing() {
     expect(tap_only.process_timers(), {}, "tap-only threshold has no hold action");
     check(!tap_only.next_deadline(), "tap-only timer is consumed");
     expect(tap_only.process(up("b", 313)), {}, "tap-only release after threshold does not tap");
-    check(!tap_only.has_tap_release(), "no late tap pulse");
+    check(!tap_only.next_deadline(), "no late tap pulse");
 
     GestureEngine replaced(config, clock);
     expect(replaced.process(down("b", 308)), {}, "pending tap/hold before replacement");

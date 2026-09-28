@@ -66,9 +66,11 @@ Use `./build/joystick-penguin --check <profile.yaml>` to validate a profile
 without opening devices. A mode action is `{type: mode, mode: alternate}`.
 Button bindings may specify a positive `threshold_ms` and `tap` and/or `hold`
 branches, each containing an `action` or `actions` list. A short release pulses
-tap outputs; reaching the threshold activates hold outputs, which release with
-the physical button. Mode selections persist until another mode action changes
-them. Captured buttons and hats stay held across mode changes; axes reroute live.
+tap outputs, which stay asserted for `tap_ms` milliseconds (default 50) before
+releasing so consumers can register the tap; reaching the threshold activates
+hold outputs, which release with the physical button. Mode selections persist
+until another mode action changes them. Captured buttons and hats stay held
+across mode changes; axes reroute live.
 
 ## Mode announcements
 

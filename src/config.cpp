@@ -285,14 +285,14 @@ std::vector<Action> parse_actions(const YAML::Node& node, const std::string& whe
 Binding parse_binding(const YAML::Node& node, std::size_t index) {
     const auto where = "bindings[" + std::to_string(index) + "]";
     keys(node, where, {"input", "modes", "modifiers", "action", "actions",
-                       "threshold_ms", "tap", "hold"});
+                       "threshold_ms", "tap_ms", "tap", "hold"});
     Binding binding;
     binding.input = input_control(required(node, "input", where), where + ".input");
     binding.modes = names(required(node, "modes", where), where + ".modes");
     if (binding.modes.empty()) throw ConfigError(where + ".modes cannot be empty");
     if (const auto modifiers = node["modifiers"])
         binding.modifiers = names(modifiers, where + ".modifiers");
-    if (node["threshold_ms"] || node["tap"] || node["hold"]) {
+    if (node["threshold_ms"] || node["tap_ms"] || node["tap"] || node["hold"]) {
         if (binding.input.kind != ControlKind::Button)
             throw ConfigError(where + " tap/hold requires a button input");
         if (node["action"] || node["actions"])
@@ -300,7 +300,10 @@ Binding parse_binding(const YAML::Node& node, std::size_t index) {
         if (!node["tap"] && !node["hold"])
             throw ConfigError(where + " requires tap or hold");
         TapHold timing{number(required(node, "threshold_ms", where), where + ".threshold_ms",
-                              1, std::numeric_limits<int>::max()), {}, {}};
+                              1, std::numeric_limits<int>::max()), 50, {}, {}};
+        if (const auto tap_ms = node["tap_ms"])
+            timing.tap_ms = number(tap_ms, where + ".tap_ms", 1,
+                                   std::numeric_limits<int>::max());
         if (node["tap"]) {
             keys(node["tap"], where + ".tap", {"action", "actions"});
             timing.tap = parse_actions(node["tap"], where + ".tap");

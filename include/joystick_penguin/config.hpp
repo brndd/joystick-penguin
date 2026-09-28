@@ -67,6 +67,7 @@ using Action = std::variant<ButtonAction, HatAction, AxisAction, ModeAction>;
 
 struct TapHold {
     int threshold_ms;
+    int tap_ms = 50; // How long tap outputs stay asserted before release.
     std::vector<Action> tap;
     std::vector<Action> hold;
 };

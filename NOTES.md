@@ -143,16 +143,18 @@ release. Axes instead reroute their cached position immediately on a mode
 change. A button's `threshold_ms` and optional `tap`/`hold` branches capture
 the current binding at press time. The engine uses an injectable `Clock` and
 exposes its next deadline to the poll loop; expired timers run serially with
-input events. Releasing before the deadline activates tap actions, followed by
-their cleanup in a second virtual frame. At the deadline, hold actions
-activate while the button is held and clean up at release. A mode action in
-either branch persists after release. Device loss and shutdown cancel pending
-deadlines without triggering a tap. See [examples/modes.yaml](examples/modes.yaml).
+input events. Releasing before the deadline activates tap actions, which stay
+asserted for `tap_ms` milliseconds (default 50) before a timer releases them, so
+taps are visible to consumers instead of lasting a single frame. At the deadline,
+hold actions activate while the button is held and clean up at release. A mode
+action in either branch persists after release. Device loss and shutdown cancel
+pending deadlines without triggering a tap. See
+[examples/modes.yaml](examples/modes.yaml).
 To try it with `evtest`, hold physical button 1, then hold button 5 past 200 ms:
 virtual button 1 remains asserted until released, button 8 asserts during the
 hold, and new presses of 1 use output 2. Moving physical axis 0 routes to
-virtual axis 1 in the alternate mode. Tap button 5 to pulse button 7 in two
-output frames; press button 6 to return to the default mode.
+virtual axis 1 in the alternate mode. Tap button 5 to assert button 7 for 50 ms;
+press button 6 to return to the default mode.
 The remapper prints `Initial mode: default` on startup and logs persistent
 transitions such as `Mode changed: default -> alternate` when they occur.
 
