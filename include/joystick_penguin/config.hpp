@@ -29,6 +29,7 @@ struct Device {
     int product_id = 1;
     std::string virtual_name = ""; // Defaults to "JP " + the configured device name.
     VirtualBus bus = VirtualBus::Virtual;
+    bool operator==(const Device&) const = default;
 };
 
 // Typed input buttons use negative keys for one-based indices; positive keys
@@ -40,27 +41,32 @@ struct Control {
     ControlKind kind;
     int code;
     int direction = 0; // -1 or +1 for one component of a physical hat.
+    bool operator==(const Control&) const = default;
 };
 
 struct ButtonAction {
     std::string device;
     int code;
+    bool operator==(const ButtonAction&) const = default;
 };
 
 struct HatAction {
     std::string device;
     int code;
     int direction;
+    bool operator==(const HatAction&) const = default;
 };
 
 struct AxisAction {
     std::string device;
     int code;
     bool invert = false;
+    bool operator==(const AxisAction&) const = default;
 };
 
 struct ModeAction {
     std::string mode;
+    bool operator==(const ModeAction&) const = default;
 };
 
 using Action = std::variant<ButtonAction, HatAction, AxisAction, ModeAction>;
@@ -70,6 +76,7 @@ struct TapHold {
     int tap_ms = 50; // How long tap outputs stay asserted before release.
     std::vector<Action> tap;
     std::vector<Action> hold;
+    bool operator==(const TapHold&) const = default;
 };
 
 struct Binding {
@@ -78,6 +85,7 @@ struct Binding {
     std::vector<std::string> modifiers;
     std::vector<Action> actions;
     std::optional<TapHold> tap_hold;
+    bool operator==(const Binding&) const = default;
 };
 
 struct Config {
@@ -86,6 +94,7 @@ struct Config {
     std::vector<std::string> modes;
     std::map<std::string, Control> modifiers;
     std::vector<Binding> bindings;
+    bool operator==(const Config&) const = default;
 };
 
 class ConfigError : public std::runtime_error {
@@ -96,5 +105,13 @@ public:
 // Both entry points validate the entire document before returning a typed config.
 Config load_config(const std::string& yaml_text);
 Config load_config_file(const std::string& path);
+
+// Serialize the supported typed model as version 1 YAML. This normalizes layout,
+// drops comments, and expands aliases. Validation uses the same loader as --check.
+std::string serialize_config(const Config& config);
+void validate_edited_config(const Config& config);
+// Validate both the edited model and the serialized document before atomically
+// replacing path. Throws ConfigError without replacing the original on failure.
+void save_config_file(const Config& config, const std::string& path);
 
 } // namespace joystick_penguin

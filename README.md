@@ -72,6 +72,22 @@ hold outputs, which release with the physical button. Mode selections persist
 until another mode action changes them. Captured buttons and hats stay held
 across mode changes; axes reroute live.
 
+## Profile editing foundation
+
+The C++ profile API in `joystick_penguin/config.hpp` provides
+`serialize_config`, `validate_edited_config`, and `save_config_file` for
+editors. Validation serializes the edited `Config`, reloads it using the same
+rules as `--check`, and rejects values that cannot round-trip. Errors include
+paths such as `bindings[3].input` or `modes.initial` for display beside edits.
+Saving also reloads the temporary file before replacing the destination.
+
+**Save policy:** Profiles are written from the typed model as version 1 YAML.
+Comments, original layout, quoting, numeric notation, and anchors are not
+preserved; aliases are expanded. Keep a separate copy if those details matter.
+Saves use a temporary file in the destination directory, flush it, and rename
+it over the profile only after validation. Failed validation or writing leaves
+the original file in place. Existing file permissions are retained.
+
 ## Mode announcements
 
 When built with espeak-ng support, the remapper speaks the name of the new mode

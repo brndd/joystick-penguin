@@ -23,7 +23,7 @@ if(JP_ENABLE_TTS)
     pkg_check_modules(ESPEAK_NG REQUIRED IMPORTED_TARGET espeak-ng)
 endif()
 
-set(JP_CORE_SOURCES src/config.cpp src/gesture_engine.cpp
+set(JP_CORE_SOURCES src/config.cpp src/config_save.cpp src/gesture_engine.cpp
     src/hardware.cpp src/joystick_preset.cpp src/output_frames.cpp)
 if(JP_ENABLE_TTS)
     list(APPEND JP_CORE_SOURCES src/speech.cpp)
@@ -49,6 +49,11 @@ if(BUILD_TESTING)
         GESTURES_PROFILE="${CMAKE_CURRENT_SOURCE_DIR}/examples/gestures.yaml"
         CONTROLS_PROFILE="${CMAKE_CURRENT_SOURCE_DIR}/examples/controls.yaml")
     add_test(NAME config_and_interfaces COMMAND joystick_penguin_tests)
+    add_executable(config_save_tests tests/config_save_test.cpp)
+    target_link_libraries(config_save_tests PRIVATE joystick_penguin_core)
+    target_compile_definitions(config_save_tests PRIVATE
+        EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples")
+    add_test(NAME config_save COMMAND config_save_tests)
     add_executable(gesture_engine_tests tests/gesture_engine_test.cpp)
     target_link_libraries(gesture_engine_tests PRIVATE joystick_penguin_core)
     add_test(NAME gesture_engine COMMAND gesture_engine_tests)
