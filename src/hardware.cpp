@@ -481,7 +481,7 @@ private:
 
 } // namespace
 
-int run_hardware(const Config& config, const std::string& profile_path) {
+int run_hardware(const Config& config, const std::string& profile_path, Speaker* speaker) {
     Config active_config = config;
     auto engine = std::make_unique<GestureEngine>(active_config);
     UinputOutput output;
@@ -493,8 +493,9 @@ int run_hardware(const Config& config, const std::string& profile_path) {
     std::cerr << "Initial mode: " << engine->mode() << '\n';
 
     auto report_mode_change = [&](const std::string& previous) {
-        if (engine->mode() != previous)
-            std::cerr << "Mode changed: " << previous << " -> " << engine->mode() << '\n';
+        if (engine->mode() == previous) return;
+        std::cerr << "Mode changed: " << previous << " -> " << engine->mode() << '\n';
+        if (speaker) speaker->speak(engine->mode());
     };
     auto process = [&](const InputEvent& event) {
         const std::string previous = engine->mode();

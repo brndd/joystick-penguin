@@ -188,3 +188,27 @@ current position of connected axes. Old-output cleanup and new-axis assertions
 are coalesced in a frame, preventing an unnecessary neutral step when an axis
 stays on the same destination. Virtual-device additions or changes to names,
 bus, IDs, axis ranges or button capabilities require a full restart.
+
+## Mode announcements (text-to-speech)
+
+When configured, mode changes are spoken aloud with espeak-ng. `run_hardware`
+receives an optional `Speaker*`; `report_mode_change` calls `speak()` with the
+new mode's name after logging the transition, so the announcement covers both
+input-driven and reload-driven mode changes. The initial mode is not announced
+because the remapper has not switched modes yet.
+
+`Speaker` is a small interface in `include/joystick_penguin/speech.hpp`.
+`EspeakSpeaker` implements it with a worker thread: construction starts the
+thread, `speak()` only enqueues a phrase and notifies a condition variable, and
+the worker owns every espeak-ng call. Initialization, voice selection, and the
+speed/pitch/range parameters are applied once on the worker before it drains the
+queue, so espeak-ng is never touched from the serialized engine loop. Destroying
+the speaker stops the worker and terminates espeak-ng.
+
+The defaults are espeak-ng's default English voice with speed 130, pitch 20, and
+range 0. `main` uses CLI11 for `--voice`, `--speed`, `--pitch`, `--range`, and
+`--no-tts`, with range validators rejecting values outside espeak-ng's limits
+before startup. The dependency is optional: configure with `-DJP_ENABLE_TTS=OFF`
+to build without espeak-ng, in which case the tuning flags are rejected with a
+clear message. Announcement failures are reported on stderr and never stop the
+remapper.

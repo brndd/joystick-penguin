@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(JP_ENABLE_TTS "Announce mode changes using espeak-ng" ON)
+
 include(FetchContent)
 FetchContent_Declare(yaml-cpp
     URL https://github.com/jbeder/yaml-cpp/releases/download/yaml-cpp-0.9.0/yaml-cpp-yaml-cpp-0.9.0.tar.gz
@@ -16,15 +18,27 @@ set(YAML_CPP_BUILD_TOOLS OFF)
 FetchContent_MakeAvailable(yaml-cpp)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
+find_package(CLI11 REQUIRED)
+if(JP_ENABLE_TTS)
+    pkg_check_modules(ESPEAK_NG REQUIRED IMPORTED_TARGET espeak-ng)
+endif()
 
-add_library(joystick_penguin_core src/config.cpp src/gesture_engine.cpp
+set(JP_CORE_SOURCES src/config.cpp src/gesture_engine.cpp
     src/hardware.cpp src/joystick_preset.cpp src/output_frames.cpp)
+if(JP_ENABLE_TTS)
+    list(APPEND JP_CORE_SOURCES src/speech.cpp)
+endif()
+add_library(joystick_penguin_core ${JP_CORE_SOURCES})
 target_include_directories(joystick_penguin_core PUBLIC include)
 target_link_libraries(joystick_penguin_core PRIVATE yaml-cpp::yaml-cpp PkgConfig::LIBEVDEV)
+if(JP_ENABLE_TTS)
+    target_link_libraries(joystick_penguin_core PRIVATE PkgConfig::ESPEAK_NG)
+    target_compile_definitions(joystick_penguin_core PUBLIC JOYSTICK_PENGUIN_ENABLE_TTS=1)
+endif()
 target_compile_options(joystick_penguin_core PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(joystick-penguin src/main.cpp)
-target_link_libraries(joystick-penguin PRIVATE joystick_penguin_core)
+target_link_libraries(joystick-penguin PRIVATE joystick_penguin_core CLI11::CLI11)
 
 include(CTest)
 if(BUILD_TESTING)

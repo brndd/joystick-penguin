@@ -9,7 +9,9 @@ buttons.
 
 Requires Linux, a C++23 compiler, CMake 3.20+, pkg-config, and libevdev
 development headers (Fedora: `libevdev-devel`). CMake downloads yaml-cpp on
-first configure.
+first configure and finds CLI11 (Fedora: `cli11-devel`). Text-to-speech
+additionally needs espeak-ng development headers (Fedora: `espeak-ng-devel`);
+configure with `-DJP_ENABLE_TTS=OFF` to build without that dependency.
 
 ```sh
 cmake -S . -B build
@@ -67,6 +69,22 @@ branches, each containing an `action` or `actions` list. A short release pulses
 tap outputs; reaching the threshold activates hold outputs, which release with
 the physical button. Mode selections persist until another mode action changes
 them. Captured buttons and hats stay held across mode changes; axes reroute live.
+
+## Mode announcements
+
+When built with espeak-ng support, the remapper speaks the name of the new mode
+when a mode action changes it. Speech runs on its own thread, so synthesis
+never blocks input handling. The voice and audio parameters can be set on the
+command line:
+
+```sh
+./build/joystick-penguin --voice en --speed 130 --pitch 20 --range 0 profile.yaml
+```
+
+The defaults are espeak-ng's default English voice at speed 130, pitch 20, and
+range 0 (monotone). `--speed` accepts 80-450 words per minute; `--pitch` and
+`--range` accept 0-100. Use `--no-tts` to disable announcements, or configure
+with `-DJP_ENABLE_TTS=OFF` to drop the dependency entirely.
 
 See [NOTES.md](NOTES.md) for implementation details and current limitations,
 [the specification](AGENTS/SPEC.md) for planned features, and [LICENSE](LICENSE)
