@@ -3,7 +3,9 @@
 #include "joystick_penguin/config.hpp"
 
 #include <map>
+#include <optional>
 #include <set>
+#include <utility>
 
 namespace joystick_penguin {
 
@@ -12,6 +14,8 @@ namespace joystick_penguin {
 constexpr int joystick_button_count = 79;
 int joystick_button_code(int number); // One-based; throws ConfigError if invalid.
 std::map<int, AxisRange> joystick_axes();
+AxisRange axis_resolution(int bits, bool zero_neutral);
+std::optional<std::pair<int, bool>> axis_resolution_settings(AxisRange range);
 std::set<int> joystick_hats();
 
 // Indexed physical inputs are normalized to private, negative engine keys;

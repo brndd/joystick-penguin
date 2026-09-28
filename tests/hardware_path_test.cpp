@@ -329,7 +329,7 @@ void run() {
     button(replacement, 1);
     check(next_button(output_fd, 1, 2000), "new press after reconnect works");
     axis(replacement, 75);
-    check(next_axis(output_fd, ABS_X, 16383, 2000), "axis moves before reload");
+    check(next_axis(output_fd, ABS_X, 3071, 2000), "axis moves before reload");
     extra_button(input_b, 1);
     session.wait_for("Mode changed: default -> alternate");
     extra_button(input_b, 0);
@@ -360,8 +360,8 @@ void run() {
     session.wait_for("Reloaded profile:");
     check(next_button(output_fd, 0, 2000), "reload clears captured old output on same virtual node");
     session.wait_for("Mode changed: alternate -> default");
-    check(next_axis(output_fd, ABS_X, 0, 2000), "reload neutralizes old axis destination");
-    check(next_axis(output_fd, ABS_Y, 16383, 2000), "reload reroutes cached position without motion");
+    check(next_axis(output_fd, ABS_X, 2048, 2000), "reload neutralizes old axis destination");
+    check(next_axis(output_fd, ABS_Y, 3071, 2000), "reload reroutes cached position without motion");
     check(!next_button(output_fd, 1, 150, BTN_THUMB), "held input does not remap retroactively");
     button(replacement, 0);
     check(!next_button(output_fd, 0, 150, BTN_THUMB), "suppressed release does not emit output");

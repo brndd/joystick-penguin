@@ -180,7 +180,8 @@ Device parse_device(const YAML::Node& node, const std::string& where) {
         if (const auto bus = node["bus"]) {
             const auto value = text(bus, where + ".bus");
             if (value == "usb") device.bus = VirtualBus::Usb;
-            else if (value != "virtual") throw ConfigError(where + ".bus must be 'usb' or 'virtual'");
+            else if (value == "virtual") device.bus = VirtualBus::Virtual;
+            else throw ConfigError(where + ".bus must be 'usb' or 'virtual'");
         }
         if (const auto vendor = node["vendor_id"])
             device.vendor_id = number(vendor, where + ".vendor_id", 0, 0xffff);
@@ -417,6 +418,14 @@ void validate_config(const Config& config) {
     for (const auto& [name, input] : config.modifiers)
         check_device(config, input.device, DeviceKind::Evdev, "modifiers." + name);
 
+    for (std::size_t i = 0; i < config.input_labels.size(); ++i) {
+        const auto& label = config.input_labels[i];
+        check_device(config, label.input.device, DeviceKind::Evdev, "input_labels[" + std::to_string(i) + "]");
+        for (std::size_t j = 0; j < i; ++j)
+            if (config.input_labels[j].input == label.input)
+                throw ConfigError("duplicate input identity in input_labels[" + std::to_string(i) + "]");
+    }
+
     for (std::size_t index = 0; index < config.bindings.size(); ++index) {
         validate_binding(config, index);
         validate_binding_precedence(config, index);
@@ -424,7 +433,7 @@ void validate_config(const Config& config) {
 }
 
 Config parse(const YAML::Node& root) {
-    keys(root, "profile", {"version", "devices", "modes", "modifiers", "bindings"});
+    keys(root, "profile", {"version", "devices", "modes", "modifiers", "bindings", "input_labels"});
     if (number(required(root, "version", "profile"), "version", 0,
                std::numeric_limits<int>::max()) != 1)
         throw ConfigError("unsupported profile version (expected 1)");
@@ -434,6 +443,15 @@ Config parse(const YAML::Node& root) {
     parse_modes(required(root, "modes", "profile"), config);
     config.modifiers = parse_modifiers(root["modifiers"]);
     config.bindings = parse_bindings(required(root, "bindings", "profile"));
+    if (const auto labels = root["input_labels"]) {
+        expect_sequence(labels, "input_labels");
+        for (std::size_t i = 0; i < labels.size(); ++i) {
+            const auto where = "input_labels[" + std::to_string(i) + "]";
+            keys(labels[i], where, {"input", "label"});
+            config.input_labels.push_back({input_control(required(labels[i], "input", where), where + ".input"),
+                                           field(labels[i], "label", where)});
+        }
+    }
     validate_config(config);
     return config;
 }

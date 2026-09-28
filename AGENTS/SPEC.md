@@ -282,7 +282,7 @@ devices:
 Uinput devices may also set `vendor_id` and `product_id` (16-bit integers,
 including `0x` hexadecimal notation) to distinguish virtual controllers;
 both default to `1`. Optional `name` overrides the default `JP <device name>`;
-`bus: usb` selects a USB virtual identity instead of the default `virtual`.
+The default bus identity is `usb`; set `bus: virtual` for a virtual bus identity.
 The preset advertises all 79 buttons and all hats, including unmapped ones, so
 game-facing button numbers do not depend on which actions are configured.
 `button: 1` denotes the first virtual preset button in an action; on a physical

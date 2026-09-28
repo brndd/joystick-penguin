@@ -1,6 +1,7 @@
 #include "joystick_penguin/config.hpp"
 
 #include <sys/stat.h>
+#include <linux/input-event-codes.h>
 
 #include <cstdlib>
 #include <filesystem>
@@ -71,6 +72,41 @@ void run() {
     }
 
     const auto path = temporary.path / "basic.yaml";
+    {
+        auto labeled = load_config_file(path.string());
+        const auto device = labeled.bindings.front().input.device;
+        const auto originalBindings = labeled.bindings;
+        labeled.input_labels = {
+            {{device, ControlKind::Button, -1}, "Trigger"},
+            {{device, ControlKind::Button, BTN_TRIGGER}, "Literal trigger"},
+            {{device, ControlKind::AbsoluteAxis, ABS_X}, "Roll"},
+            {{device, ControlKind::HatDirection, ABS_HAT0X, -1}, "Trim negative"},
+            {{device, ControlKind::HatDirection, ABS_HAT0X, 1}, "Trim positive"},
+        };
+        check(load_config(serialize_config(labeled)) == labeled, "labels retain exact indexed, literal, axis and hat identities");
+        save_config_file(labeled, path.string());
+        check(load_config_file(path.string()) == labeled && labeled.bindings == originalBindings, "labels save without changing mappings");
+        auto duplicate = labeled;
+        duplicate.input_labels.push_back(labeled.input_labels.front());
+        rejected([&] { serialize_config(duplicate); }, "duplicate input identity");
+        auto invalid = labeled;
+        invalid.input_labels.front().input.device = "missing";
+        rejected([&] { save_config_file(invalid, path.string()); }, "input_labels[0]");
+        check(load_config_file(path.string()) == labeled, "invalid label leaves original file intact");
+        invalid = labeled; invalid.input_labels.front().label.clear();
+        rejected([&] { serialize_config(invalid); }, "label must be a nonempty string");
+        invalid = labeled; invalid.input_labels.back().input.direction = 0;
+        rejected([&] { serialize_config(invalid); }, "direction");
+        auto conflicts = labeled;
+        conflicts.bindings.push_back(conflicts.bindings.front());
+        auto issues = config_issues(conflicts);
+        check(issues.size() == 1 && issues.front().bindings == std::vector<std::size_t>{2, 0}, "structured conflict links both mappings");
+        conflicts = labeled;
+        conflicts.bindings[1].modes = {"missing"};
+        issues = config_issues(conflicts);
+        check(issues.size() == 1 && issues.front().bindings == std::vector<std::size_t>{1}, "diagnostic location independent of loader message");
+        labeled.input_labels.clear(); save_config_file(labeled, path.string());
+    }
     const auto baseline = contents(path);
     auto edited = load_config_file(path.string());
     edited.bindings[0].modes = {"missing"};

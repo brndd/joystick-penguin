@@ -3,6 +3,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <cerrno>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -115,6 +116,16 @@ std::string emit_config(const Config& config) {
     for (const auto& [name, input] : config.modifiers)
         modifiers[name]["input"] = control(input);
     root["modifiers"] = modifiers;
+    if (!config.input_labels.empty()) {
+        YAML::Node labels(YAML::NodeType::Sequence);
+        for (const auto& label : config.input_labels) {
+            YAML::Node entry(YAML::NodeType::Map);
+            entry["input"] = control(label.input);
+            entry["label"] = label.label;
+            labels.push_back(entry);
+        }
+        root["input_labels"] = labels;
+    }
     YAML::Node bindings(YAML::NodeType::Sequence);
     for (const auto& binding : config.bindings) {
         YAML::Node entry(YAML::NodeType::Map);
@@ -164,6 +175,45 @@ std::string checked_yaml(const Config& config) {
 std::string serialize_config(const Config& config) { return checked_yaml(config); }
 
 void validate_edited_config(const Config& config) { (void)checked_yaml(config); }
+
+std::vector<ConfigIssue> config_issues(const Config& config) {
+    std::vector<ConfigIssue> issues;
+    Config isolated = config;
+    isolated.bindings.clear();
+    bool nonBindingIssue = false;
+    try { validate_edited_config(isolated); }
+    catch (const ConfigError& error) { issues.push_back({error.what(), {}}); nonBindingIssue = true; }
+    // Fast path: a profile whose full serialization round-trips has no
+    // binding-local or precedence issues. Avoid the per-binding serialization
+    // loop below, which is what made issue recalculation expensive.
+    try { validate_edited_config(config); return issues; }
+    catch (const ConfigError&) {}
+    // Validate each mapping independently through the same serializer and loader.
+    // Locations are attached by construction, never extracted from error prose.
+    if (!nonBindingIssue) {
+        for (std::size_t i = 0; i < config.bindings.size(); ++i) {
+            isolated.bindings = {config.bindings[i]};
+            try { validate_edited_config(isolated); }
+            catch (const ConfigError& error) {
+                std::string message = error.what();
+                if (message.starts_with("bindings[0]")) message.replace(0, 11, "bindings[" + std::to_string(i) + "]");
+                issues.push_back({std::move(message), {i}});
+            }
+        }
+    }
+    for (std::size_t i = 0; i < config.bindings.size(); ++i) {
+        const auto& binding = config.bindings[i];
+        for (std::size_t j = 0; j < i; ++j) {
+            const auto& other = config.bindings[j];
+            bool overlap = std::any_of(binding.modes.begin(), binding.modes.end(), [&](const auto& mode) {
+                return std::find(other.modes.begin(), other.modes.end(), mode) != other.modes.end();
+            });
+            if (binding.input == other.input && binding.modifiers.size() == other.modifiers.size() && overlap)
+                issues.push_back({"Mapping conflicts at equal specificity in overlapping modes. Change In modes or While held, or remove a duplicate.", {i, j}});
+        }
+    }
+    return issues;
+}
 
 void save_config_file(const Config& config, const std::string& path) {
     const auto yaml = checked_yaml(config);

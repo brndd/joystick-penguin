@@ -90,6 +90,7 @@ void run() {
           modified_b[1].code == 294, "manual B uses two captured actions");
     check(config.devices.size() == 3 && config.bindings.size() == 2, "profile size");
     check(config.devices.at("physical").grab, "default grab");
+    check(config.devices.at("virtual").bus == VirtualBus::Usb, "default virtual joystick uses USB bus identity");
     check(!config.devices.at("shared").grab, "explicit shared device");
     check(config.initial_mode == "default", "initial mode");
     check(config.modifiers.at("shift").code == -4, "modifier index");
@@ -114,6 +115,8 @@ void run() {
           explicit_device.vendor_id == 0x4711 && explicit_device.product_id == 0x0817 &&
           explicit_device.axes.contains(7), "explicit virtual identity and preset axes");
     rejected(replace(full_virtual, "bus: usb", "bus: invalid"), "bus must be");
+    check(load_config(replace(full_virtual, "bus: usb", "bus: virtual")).devices.at("virtual").bus == VirtualBus::Virtual,
+          "explicit virtual bus identity remains available");
     rejected(replace(full_virtual, "product_id: 0x0817", "product_id: 0x10000"),
              "out of permitted range");
 

@@ -12,6 +12,8 @@ development headers (Fedora: `libevdev-devel`). CMake downloads yaml-cpp on
 first configure and finds CLI11 (Fedora: `cli11-devel`). Text-to-speech
 additionally needs espeak-ng development headers (Fedora: `espeak-ng-devel`);
 configure with `-DJP_ENABLE_TTS=OFF` to build without that dependency.
+The profile editor requires Qt 6 Widgets development files (Fedora: `qt6-qtbase-devel`).
+Configure with `-DJP_BUILD_GUI=OFF` for a CLI-only build without Qt.
 
 ```sh
 cmake -S . -B build
@@ -87,6 +89,112 @@ preserved; aliases are expanded. Keep a separate copy if those details matter.
 Saves use a temporary file in the destination directory, flush it, and rename
 it over the profile only after validation. Failed validation or writing leaves
 the original file in place. Existing file permissions are retained.
+
+## Visual profile editor
+
+Run `./build/joystick-penguin-gui [profile.yaml]` to create or edit a profile.
+The toolbar provides New/Open/Save/Save As and Undo/Redo. Standard file shortcuts
+work. The document name and `*` identify unsaved changes. Editing is live: there
+is no Done/Cancel step, and consecutive edits to one mapping collapse into a
+single undo step.
+
+- **Mappings:** choose a controller and select one or more physical controls in
+  the browser (Ctrl/Shift click, Ctrl+A). The mappings view lists the selected
+  controls' mappings; with nothing selected it is empty. Configured controls are
+  listed even when hardware is absent. Mapping counts and modifier-only controls
+  are shown. Use **Add**, **Duplicate**, and **Delete** to manage mappings.
+- Open a mapping to edit its conditions and actions inline. Action forms write
+  through as you edit them. Click an action in the left-hand list to edit it on
+  the right; add actions below the list and reorder or remove them using the
+  buttons beside each action. In Tap/Hold mappings, the combined **Name | Type**
+  list shows both branches; use the Type selector on a row to move an action
+  between Tap and Hold. **Undo** reverses a
+  mapping edit; **Save** writes YAML and does not apply a profile to a running
+  remapper.
+- **Devices:** edit controllers and virtual joysticks in place. Choose detected
+  hardware by name or enter a stable path manually. Connection details contain
+  **Exclusive mode** (take the controller exclusively while remapping so other
+  applications must use the virtual joystick); the always-visible advanced
+  virtual properties contain bus/IDs and axis ranges. The bus choice changes the
+  device identity reported to applications (**virtual** or **USB**), not how
+  events are delivered. The joystick preset includes 79 buttons, four
+  hats, and axes 0–7; extra axes may be added and preset ranges reset.
+- **Modes & modifiers:** edit persistent modes and named held buttons, with a
+  table of their mappings; click a row to jump to that mapping. Use the star
+  beside a mode to set the **default mode** (the initial mode when remapping
+  starts). Use **+** by a section heading to add an item and its trash button
+  to remove it with confirmation. Renames update references. Used definitions
+  must be removed from mappings before deleting them.
+  Returning from a mapping retains the selected mode's or modifier's usage-table
+  scroll position.
+- **Issues:** profile diagnostics link to the relevant mappings, including both
+  sides of a precedence conflict. The status bar at the bottom of the window
+  reports validity; when it reports issues, click it to open **Issues**.
+
+**New** starts empty: the Mappings view asks for a physical and a virtual
+controller, with buttons that jump to **Devices** and create one. There is no
+default dummy device. A virtual joystick is created with preset defaults.
+
+Every listed control has a passive activity indicator. Readable controllers are
+monitored without an exclusive grab: buttons show held/released state, axes show
+values with a short motion highlight, and hats show their component's sign.
+Display updates are throttled, and small axis noise does not keep the motion
+indicator illuminated. A one-word monitor status sits at the bottom of the
+browser (green **Monitoring**, otherwise a red error) with a refresh button
+tooltip **Reconnect monitor**. Another process's exclusive grab can suppress live
+events; silence alone does not establish that a grab exists. Static capabilities
+and offline editing remain available. Hardware availability is separate from
+profile validation.
+
+### Physical input labels (version 1)
+
+Double-click a control's name in the browser to edit its label inline (an empty
+label removes it); a name such as `Trigger` keeps the underlying input visible.
+Labels apply to all mappings and modifier references for the exact input. They
+are optional metadata and do not change runtime behavior:
+
+```yaml
+version: 1
+# devices, modes, modifiers and bindings as usual
+input_labels:
+  - input: {device: physical, button: 1}
+    label: Trigger
+  - input: {device: physical, button_code: 288}
+    label: Literal trigger
+  - input: {device: physical, axis: 0}
+    label: Roll
+  - input: {device: physical, hat: {axis: 16, direction: -1}}
+    label: Trim negative
+```
+
+Each device/kind/code/direction identity may have at most one nonempty label.
+Indexed buttons and literal EV_KEY codes remain distinct identities, even if
+hardware resolves them to the same button. Different controls may share display
+labels. Labels must reference a declared physical device and a valid input
+identity, but need not reference a mapping or currently connected hardware.
+Removing a mapping retains its label; clearing the label removes the metadata.
+Renaming a device updates label references, and removing an unused device removes
+its labels. Old profiles load with no labels; the serializer omits `input_labels`
+when empty. The profile version remains 1.
+
+Saving rewrites YAML according to the policy above. Confirm a saved profile with
+`./build/joystick-penguin --check profile.yaml`.
+
+The GUI's `ProfileDocument` owns the editable `Config`, undo history, saved state,
+and cached issues. `EditorWindow` handles files, toolbar commands, issues, and
+navigation. `MappingWorkspace` owns the control browser, binding model/filter,
+and `BindingDetail`; the detail owns `ActionList`, which creates an `ActionEditor`
+for the selected action. `SetupWorkspace` owns the device/mode/modifier lists and
+usage navigation, creating a focused property form for each selection. Both
+workspaces propose edits through the document, which notifies the binding model
+of insertions, removals, updates, and replacements. GUI tests cover
+offline and mixed-profile editing, labels, draft cancellation, undo/redo, issues,
+and `--check` of saved copies of every example. The `control_browser` integration
+test uses a synthetic uinput controller to verify held buttons, axis/hat values,
+exclusive grabs, and unplugging (skipped when uinput or evdev access is unavailable).
+For visual review, `JP_GUI_SCREENSHOT=/tmp/editor.png` captures the 1024×768 fixture
+when running `gui_editor_tests`; `JP_GUI_DARK=1` selects its dark-palette fixture,
+and `QT_SCALE_FACTOR=2` exercises high-DPI rendering.
 
 ## Mode announcements
 

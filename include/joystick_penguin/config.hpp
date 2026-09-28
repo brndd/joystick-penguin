@@ -28,7 +28,7 @@ struct Device {
     int vendor_id = 1; // Virtual USB-style identity; applies only to uinput.
     int product_id = 1;
     std::string virtual_name = ""; // Defaults to "JP " + the configured device name.
-    VirtualBus bus = VirtualBus::Virtual;
+    VirtualBus bus = VirtualBus::Usb;
     bool operator==(const Device&) const = default;
 };
 
@@ -88,12 +88,19 @@ struct Binding {
     bool operator==(const Binding&) const = default;
 };
 
+struct InputLabel {
+    Control input;
+    std::string label;
+    bool operator==(const InputLabel&) const = default;
+};
+
 struct Config {
     std::map<std::string, Device> devices;
     std::string initial_mode;
     std::vector<std::string> modes;
     std::map<std::string, Control> modifiers;
     std::vector<Binding> bindings;
+    std::vector<InputLabel> input_labels;
     bool operator==(const Config&) const = default;
 };
 
@@ -110,6 +117,11 @@ Config load_config_file(const std::string& path);
 // drops comments, and expands aliases. Validation uses the same loader as --check.
 std::string serialize_config(const Config& config);
 void validate_edited_config(const Config& config);
+struct ConfigIssue {
+    std::string message;
+    std::vector<std::size_t> bindings; // Both locations for a precedence conflict.
+};
+std::vector<ConfigIssue> config_issues(const Config& config);
 // Validate both the edited model and the serialized document before atomically
 // replacing path. Throws ConfigError without replacing the original on failure.
 void save_config_file(const Config& config, const std::string& path);
