@@ -402,6 +402,87 @@ void offlineButtonChoices() {
           output.currentText() == "Button 79", "virtual selector uses its own preset without physical labels");
 }
 
+void multiControllerBrowsing() {
+    TemporaryDirectory temporary;
+    auto config = load_config_file((std::filesystem::path(EXAMPLES_DIR) / "basic.yaml").string());
+    config.devices.at("physical").path = "/dev/input/by-id/absent-multi-browser";
+    config.devices.emplace("other", Device{DeviceKind::Evdev, "/dev/input/by-id/absent-other"});
+    config.devices.emplace("other-vjoy", config.devices.at("virtual"));
+    config.bindings.push_back({{"other", ControlKind::Button, -2}, {"default"}, {},
+                               {ButtonAction{"other-vjoy", joystick_button_code(2)}}, std::nullopt});
+    config.bindings.push_back({{"physical", ControlKind::Button, -3}, {"alternate"}, {}, {},
+                               TapHold{200, 50, {ButtonAction{"other-vjoy", joystick_button_code(3)}},
+                                       {ButtonAction{"other-vjoy", joystick_button_code(2)}}}});
+    const auto path = temporary.path / "browse.yaml";
+    save_config_file(config, path.string());
+    EditorWindow window;
+    window.show();
+    check(window.openProfile(QString::fromStdString(path.string())), "open multi-controller profile");
+    auto* tree = named<QTreeWidget>(window, "controlTree");
+    auto* table = named<QTableView>(window, "bindingTable");
+    auto* combo = named<QComboBox>(window, "controllerBrowser");
+    check(combo->currentText() == "All" && combo->count() == 7 &&
+          combo->itemText(1) == "Physical only" && combo->itemText(2) == "Virtual only" &&
+          tree->topLevelItemCount() == 4 && table->model()->rowCount() == 4,
+          "All defaults to all configured controllers and all bindings");
+    auto root = [&](const QString& name) -> QTreeWidgetItem* {
+        for (int i = 0; i < tree->topLevelItemCount(); ++i)
+            if (tree->topLevelItem(i)->text(0).startsWith(name + " ·")) return tree->topLevelItem(i);
+        throw std::runtime_error("missing controller root: " + name.toStdString());
+    };
+    auto* virtualRoot = root("other-vjoy");
+    check(virtualRoot->child(0)->childCount() == joystick_button_count,
+          "virtual preset buttons appear without running hardware");
+    virtualRoot->setExpanded(false);
+    combo->setCurrentIndex(1);
+    check(tree->topLevelItemCount() == 2 && table->model()->rowCount() == 4 &&
+          root("physical") && root("other"), "Physical only shows both physical controllers");
+    combo->setCurrentIndex(2);
+    check(tree->topLevelItemCount() == 2 && table->model()->rowCount() == 4 &&
+          root("virtual") && root("other-vjoy"), "Virtual only shows both virtual controllers: " +
+          std::to_string(tree->topLevelItemCount()) + " roots, " + std::to_string(table->model()->rowCount()) + " mappings");
+    tree->setCurrentItem(root("virtual")->child(0)->child(1));
+    tree->selectAll();
+    check(table->model()->rowCount() == 4 && root("other-vjoy")->child(0)->child(1)->isSelected(),
+          "Select All includes controls in collapsed controller branches");
+    combo->setCurrentText("physical");
+    check(tree->topLevelItemCount() == 1, "controller dropdown narrows the tree");
+    combo->setCurrentText("All");
+    check(!root("other-vjoy")->isExpanded(), "controller expansion survives filtering");
+    auto* button2 = root("other-vjoy")->child(0)->child(1);
+    tree->setCurrentItem(button2);
+    check(table->model()->rowCount() == 2 && button2->text(1) == "2",
+          "virtual button selects immediate and Hold output mappings");
+    QLineEdit* controlSearch = nullptr;
+    for (auto* line : window.findChildren<QLineEdit*>())
+        if (line->placeholderText() == "Find control…") controlSearch = line;
+    check(controlSearch != nullptr, "control search is available");
+    controlSearch->setText("Button 3 ");
+    check(root("other-vjoy")->child(0)->childCount() == 1 &&
+          root("other-vjoy")->child(0)->child(0)->text(0) == "Button 3",
+          "control search matches virtual button numbers");
+    check(table->model()->rowCount() == 2, "control search does not discard hidden selections");
+    controlSearch->clear();
+    button2 = root("other-vjoy")->child(0)->child(1);
+    check(button2->isSelected(), "hidden selection reappears after clearing control search");
+    auto* button3 = root("other-vjoy")->child(0)->child(2);
+    tree->setCurrentItem(button3);
+    check(table->model()->rowCount() == 1 && button3->text(1) == "1",
+          "Tap output mapping is visible from its virtual button");
+    tree->setCurrentItem(button2);
+    auto* physicalRoot = root("physical");
+    tree->setCurrentItem(physicalRoot->child(0)->child(0), 0, QItemSelectionModel::Select);
+    check(table->model()->rowCount() == 4,
+          "Ctrl-style selection combines physical input and virtual output mappings without duplicates");
+    table->setCurrentIndex(table->model()->index(0, 0));
+    check(table->model()->rowCount() == 4 && button2->isSelected(),
+          "opening a mapping does not discard multiple control selections");
+    tree->setCurrentItem(root("other-vjoy")->child(0));
+    check(table->model()->rowCount() == 2, "clicking a group selects all its output controls");
+    tree->setCurrentItem(root("other"));
+    check(table->model()->rowCount() == 1, "clicking a physical controller selects its inputs");
+}
+
 void overhaul() {
     EditorWindow window;
     window.resize(1024, 768);
@@ -419,10 +500,17 @@ void overhaul() {
     check(toolbar->contextMenuPolicy() == Qt::NoContextMenu, "toolbar visibility menu disabled");
     check(!action_named(window, "&Save")->isEnabled(), "unchanged profile cannot be saved again");
     auto* tree = named<QTreeWidget>(window, "controlTree");
-    check(tree->topLevelItemCount() == 3, "controls grouped as buttons, hats, axes offline");
-    for (int g = 0; g < tree->topLevelItemCount(); ++g)
-        for (int i = 0; i < tree->topLevelItem(g)->childCount(); ++i)
-            check(!tree->topLevelItem(g)->child(i)->text(2).isEmpty(), "every listed control has a passive indicator");
+    check(tree->topLevelItemCount() == static_cast<int>(window.config().devices.size()),
+          "all configured controllers appear as roots");
+    for (int d = 0; d < tree->topLevelItemCount(); ++d) {
+        auto* root = tree->topLevelItem(d);
+        check(root->childCount() == 3 && root->child(0)->text(0) == "Buttons" &&
+              root->child(1)->text(0) == "Hats" && root->child(2)->text(0) == "Axes",
+              "controls are grouped within each controller");
+        for (int g = 0; g < root->childCount(); ++g)
+            for (int i = 0; i < root->child(g)->childCount(); ++i)
+                check(!root->child(g)->child(i)->text(2).isEmpty(), "every listed control has a passive indicator");
+    }
     check(named<QLabel>(window, "monitorStatus")->text().contains("Offline"), "absent hardware has visible offline feedback");
     selectAllControls(window);
     auto* table = named<QTableView>(window, "bindingTable");
@@ -438,7 +526,10 @@ void overhaul() {
     }
     check(timed, "large fixture exposes tap and hold summaries");
     const auto input = window.config().bindings.front().input;
-    auto* first = tree->topLevelItem(2)->child(0);
+    QTreeWidgetItem* first = nullptr;
+    for (int d = 0; d < tree->topLevelItemCount(); ++d)
+        if (tree->topLevelItem(d)->text(0).startsWith(QString::fromStdString(input.device) + " ·"))
+            first = tree->topLevelItem(d)->child(2)->child(0);
     check(first != nullptr, "offline axis present");
     tree->setCurrentItem(first);
     selectAllControls(window);
@@ -448,7 +539,8 @@ void overhaul() {
     first->setText(0, "Flight roll");
     QApplication::processEvents();
     check(table->currentIndex().isValid() && table->currentIndex().row() == 1,
-          "editing a control label preserves the selected mapping row");
+          "editing a control label preserves the selected mapping row: " +
+          std::to_string(table->currentIndex().row()));
     check(window.config().input_labels.size() == 1, "label stored once per physical identity");
     check(action_named(window, "&Save")->isEnabled(), "editing enables Save");
     check(window.config().bindings.front().input == input, "label does not change input identity");
@@ -694,6 +786,7 @@ void deviceRemovalFromGui() {
 
 void run() {
     offlineButtonChoices();
+    multiControllerBrowsing();
     { EditorWindow defaultWindow; check(defaultWindow.size() == QSize(1600, 900), "initial window is 1600x900"); }
     overhaul();
     newProfileFromGui();
@@ -913,8 +1006,7 @@ void run() {
     named<QComboBox>(window, "inputKind")->setCurrentIndex(2);
     QApplication::processEvents();
     check(window.config().bindings[0].input.kind == ControlKind::HatDirection, "hat direction input edited");
-    // Restore a valid profile, changing a hat binding with a hat action. The
-    // control browser only lists one controller at a time, so select it first.
+    // Restore a valid profile, changing a hat binding with a hat action.
     window.openProfile(QString::fromStdString((std::filesystem::path(EXAMPLES_DIR) / "controls.yaml").string()));
     named<QComboBox>(window, "controllerBrowser")->setCurrentText("right");
     QApplication::processEvents();

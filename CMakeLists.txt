@@ -104,7 +104,7 @@ if(BUILD_TESTING)
             EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples"
             CLI_PATH="$<TARGET_FILE:joystick-penguin>")
         add_test(NAME gui_editor COMMAND gui_editor_tests)
-        set_tests_properties(gui_editor PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+        set_tests_properties(gui_editor PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
         add_executable(control_browser_tests tests/control_browser_test.cpp src/gui/control_browser.cpp src/gui/button_selector.cpp)
         target_include_directories(control_browser_tests PRIVATE src/gui)
         target_link_libraries(control_browser_tests PRIVATE joystick_penguin_core Qt6::Widgets PkgConfig::LIBEVDEV)

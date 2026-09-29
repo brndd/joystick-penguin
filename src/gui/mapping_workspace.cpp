@@ -63,7 +63,7 @@ MappingWorkspace::MappingWorkspace(ProfileDocument& document, QWidget* parent)
     int filterIndex = 0;
     for (auto* combo : {deviceFilter_, kindFilter_, modeFilter_, modifierFilter_}) {
         auto* column = new QVBoxLayout;
-        auto* label = new QLabel(QStringList{"Controller", "Control type", "View mode", "While held"}[filterIndex++], browser);
+        auto* label = new QLabel(QStringList{"Input controller", "Input type", "View mode", "While held"}[filterIndex++], browser);
         label->setBuddy(combo); column->addWidget(label); column->addWidget(combo); filters->addLayout(column);
     }
     left->addLayout(filters);
@@ -113,12 +113,12 @@ MappingWorkspace::MappingWorkspace(ProfileDocument& document, QWidget* parent)
             std::erase_if(config.input_labels, [&](const auto& entry) { return entry.input == input; });
             if (!label.isEmpty()) config.input_labels.push_back({input, str(label)});
         })) return;
+        detail_->refresh();
+        refreshBinding();
         if (selectedRow >= 0) {
             const auto visible = proxy_->mapFromSource(model_->index(selectedRow, 0));
             if (visible.isValid()) table_->setCurrentIndex(visible);
         }
-        detail_->refresh();
-        refreshBinding();
     };
     // The detail owns its input, condition, timing, and action editors.
     auto* scroll = new QScrollArea(splitter);
@@ -179,7 +179,10 @@ MappingWorkspace::MappingWorkspace(ProfileDocument& document, QWidget* parent)
         connect(combo, &QComboBox::currentIndexChanged, this, updateFilter);
     connect(add, &QPushButton::clicked, this, [this] {
         auto selectedControl = controls_->current();
-        if (!selectedControl) {
+        const auto selectedControls = controls_->selectedControls();
+        if (!selectedControl || !config_.devices.contains(selectedControl->device) ||
+            config_.devices.at(selectedControl->device).kind != DeviceKind::Evdev ||
+            std::find(selectedControls.begin(), selectedControls.end(), *selectedControl) == selectedControls.end()) {
             QMessageBox::warning(this, "No control selected", "Select a physical control in the list on the left first.");
             return;
         }
@@ -261,7 +264,6 @@ void MappingWorkspace::selectBinding(int row) {
     if (selected_ != row) document_.breakMappingSession();
     selected_ = row;
     detail_->selectBinding(row);
-    if (row >= 0 && row < static_cast<int>(config_.bindings.size())) controls_->select(config_.bindings[row].input);
     notifyChanged();
 }
 
@@ -269,13 +271,17 @@ void MappingWorkspace::refreshBinding() {
     const QSignalBlocker blocker(table_->selectionModel());
     controls_->refresh();
     if (selected_ >= 0) model_->changed(selected_);
+    proxy_->refresh();
+    if (selected_ >= 0) {
+        const auto visible = proxy_->mapFromSource(model_->index(selected_, 0));
+        if (visible.isValid()) table_->setCurrentIndex(visible);
+    }
     detail_->updateSummary();
     notifyChanged();
 }
 
 void MappingWorkspace::showControl(const Control& input) {
     controls_->select(input);
-    proxy_->inputFilter = true; proxy_->inputs = {input}; proxy_->refresh();
 }
 
 void MappingWorkspace::showMapping(int row) {
@@ -298,7 +304,7 @@ void MappingWorkspace::resetBrowsing(bool resetKind) {
     proxy_->inputFilter = true; proxy_->inputs.clear();
     search_->clear();
     if (resetKind) kindFilter_->setCurrentIndex(0);
-    refreshFilters(); selectBinding(-1);
+    controls_->resetBrowsing(); refreshFilters(); selectBinding(-1);
     if (resetKind && model_->rowCount()) table_->setCurrentIndex(proxy_->index(0, 0));
 }
 

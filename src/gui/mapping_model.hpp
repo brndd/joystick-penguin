@@ -28,8 +28,8 @@ class BindingFilter : public QSortFilterProxyModel {
 public:
     using QSortFilterProxyModel::QSortFilterProxyModel;
     QString search, device, kind, mode, modifier;
-    // When true, only bindings whose input is one of the selected controls are
-    // shown. An empty selection therefore hides every mapping.
+    // Physical selections match inputs; virtual selections match output actions.
+    // An empty selection hides every mapping.
     bool inputFilter = false;
     std::vector<joystick_penguin::Control> inputs;
     const joystick_penguin::Config* config = nullptr;

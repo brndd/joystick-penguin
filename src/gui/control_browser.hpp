@@ -15,6 +15,7 @@ public:
     explicit ControlBrowser(const joystick_penguin::Config& config, QWidget* parent = nullptr);
     ~ControlBrowser() override;
     void refresh();
+    void resetBrowsing();
     void select(const joystick_penguin::Control& input);
     std::optional<joystick_penguin::Control> current() const;
     std::vector<joystick_penguin::Control> selectedControls() const;
@@ -23,8 +24,9 @@ public:
 private:
     struct State;
     std::unique_ptr<State> s_;
-    void connectDevice();
+    void connectDevices(bool force);
     void rebuild();
     void displayActivity();
     void emitSelection();
+    void selectVisible();
 };

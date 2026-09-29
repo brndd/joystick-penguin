@@ -93,10 +93,35 @@ void BindingFilter::refresh() {
     invalidateFilter();
 #endif
 }
+namespace {
+bool matchesOutput(const Action& action, const Control& control) {
+    return std::visit([&](const auto& value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, ModeAction>) return false;
+        else if constexpr (std::is_same_v<T, ButtonAction>)
+            return value.device == control.device && control.kind == ControlKind::Button && value.code == control.code;
+        else if constexpr (std::is_same_v<T, AxisAction>)
+            return value.device == control.device && control.kind == ControlKind::AbsoluteAxis && value.code == control.code;
+        else return value.device == control.device && control.kind == ControlKind::HatDirection &&
+                    value.code == control.code && value.direction == control.direction;
+    }, action);
+}
+bool containsOutput(const Binding& binding, const Control& control) {
+    auto contains = [&](const std::vector<Action>& actions) {
+        return std::any_of(actions.begin(), actions.end(), [&](const Action& action) { return matchesOutput(action, control); });
+    };
+    return contains(binding.actions) || (binding.tap_hold &&
+        (contains(binding.tap_hold->tap) || contains(binding.tap_hold->hold)));
+}
+}
 bool BindingFilter::filterAcceptsRow(int row, const QModelIndex& parent) const {
     if (!config) return true;
     const auto& binding = config->bindings.at(row);
-    if (inputFilter && std::find(inputs.begin(), inputs.end(), binding.input) == inputs.end()) return false;
+    if (inputFilter && !std::any_of(inputs.begin(), inputs.end(), [&](const Control& control) {
+        const auto found = config->devices.find(control.device);
+        return found != config->devices.end() && (found->second.kind == DeviceKind::Evdev ?
+            binding.input == control : containsOutput(binding, control));
+    })) return false;
     if (!device.isEmpty() && device != qs(binding.input.device)) return false;
     if (kind == "Axis" && binding.input.kind != ControlKind::AbsoluteAxis) return false;
     if (kind == "Hat" && binding.input.kind != ControlKind::HatDirection) return false;

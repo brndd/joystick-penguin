@@ -31,6 +31,9 @@ int main(int argc, char** argv) {
     try {
         std::unique_ptr<libevdev, decltype(&libevdev_free)> device(libevdev_new(), libevdev_free);
         libevdev_set_name(device.get(), "JP GUI monitor test");
+        libevdev_set_id_bustype(device.get(), BUS_USB);
+        libevdev_set_id_vendor(device.get(), 1);
+        libevdev_set_id_product(device.get(), 1);
         libevdev_enable_event_code(device.get(), EV_KEY, BTN_TRIGGER, nullptr);
         input_absinfo range{}; range.minimum = -32768; range.maximum = 32767;
         libevdev_enable_event_code(device.get(), EV_ABS, ABS_X, &range);
@@ -47,6 +50,9 @@ int main(int argc, char** argv) {
         if (reader < 0) { std::cout << "evdev unreadable; monitor hardware test skipped\n"; return 77; }
         Config config;
         config.devices.emplace("stick", Device{DeviceKind::Evdev, node, true, ""});
+        auto virtualDevice = Device{DeviceKind::Uinput, "", true, "joystick"};
+        virtualDevice.virtual_name = "JP GUI monitor test";
+        config.devices.emplace("vjoy", virtualDevice);
         config.modifiers.emplace("shift", std::vector<Control>{{"stick", ControlKind::Button, -1}});
         config.input_labels.push_back({{"stick", ControlKind::Button, -1}, "Trigger"});
         ButtonSelector selector(config, ButtonSelector::Target::Physical);
@@ -61,6 +67,12 @@ int main(int argc, char** argv) {
               "changing controller drops an unavailable choice");
         ControlBrowser browser(config);
         browser.show(); wait();
+        auto* tree = browser.findChild<QTreeWidget*>("controlTree");
+        check(tree->topLevelItemCount() == 2 && tree->topLevelItem(1)->text(0).contains("Virtual"),
+              "physical and virtual controllers appear together");
+        auto* output = tree->topLevelItem(1)->child(0)->child(0);
+        check(output->text(0) == "Button 1" && output->text(2).contains("Released"),
+              "matching running virtual controller reports live output activity");
         check(item(browser, "Trigger")->text(1).contains("Modifier"), "modifier-only control is identified");
         check(item(browser, "Trigger")->text(2).contains("Released"), "idle button has passive indicator");
         auto send = [&](int type, int code, int value) {
@@ -69,10 +81,12 @@ int main(int argc, char** argv) {
         };
         send(EV_KEY, BTN_TRIGGER, 1);
         check(item(browser, "Trigger")->text(2).contains("Held"), "button stays lit while held");
+        check(output->text(2).contains("Held"), "virtual output button stays lit while held");
         wait(300);
         check(item(browser, "Trigger")->text(2).contains("Held"), "held indicator does not time out");
         send(EV_KEY, BTN_TRIGGER, 0);
         check(item(browser, "Trigger")->text(2).contains("Released"), "button release clears indicator");
+        check(output->text(2).contains("Released"), "virtual output release clears indicator");
         send(EV_ABS, ABS_X, 12000);
         check(item(browser, "X")->text(2).contains("12000"), "axis displays current value");
         wait(250);
@@ -85,11 +99,12 @@ int main(int argc, char** argv) {
         send(EV_KEY, BTN_TRIGGER, 1);
         check(item(browser, "Trigger")->text(2).contains("Released"), "exclusive grab suppresses events to GUI");
         auto status = browser.findChild<QLabel*>("monitorStatus");
-        check(status->toolTip().contains("exclusive grab") && status->toolTip().contains("silence alone"), "monitor explains limitations without inventing grab failure");
+        check(status->toolTip().contains("may be hidden while another app"), "monitor describes activity limits plainly");
         ioctl(reader, EVIOCGRAB, 0); close(reader);
         source.reset(); wait();
         check(browser.findChild<QLabel*>("monitorStatus")->text().contains("Disconnected"), "unplug is reported without blocking");
         check(item(browser, "Trigger")->text(2) == "○" && item(browser, "Trigger")->toolTip(2) == "Offline", "unplug clears held activity");
+        check(output->text(2) == "○", "unplug clears virtual activity");
         std::cout << "control browser activity tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
