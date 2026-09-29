@@ -19,6 +19,9 @@ devices:
     bus: usb
     vendor_id: 0x4711
     product_id: 0x0817
+    axes:
+      4: {min: 0, max: 2047, neutral: 1024}
+      5: {min: 0, max: 2047, neutral: 0}
   right-vjoy:
     kind: uinput
     preset: joystick
@@ -26,6 +29,9 @@ devices:
     bus: usb
     vendor_id: 0x4711
     product_id: 0x0818
+    axes:
+      4: {min: 0, max: 2047, neutral: 1024}
+      5: {min: 0, max: 2047, neutral: 0}
 modes: {initial: SCM Mode, names: [SCM Mode, Auxiliary Mode, Nav Mode]}
 modifiers:
   leftmod: {inputs: [{device: left, button: 5}]}
@@ -37,13 +43,13 @@ bindings:
   - {input: {device: left, axis: 5}, modes: *base, action: {type: axis, device: left-vjoy, axis: 4}}
   - {input: {device: left, axis: 0}, modes: *base, action: {type: axis, device: left-vjoy, axis: 0}}
   - {input: {device: left, axis: 1}, modes: *base, action: {type: axis, device: left-vjoy, axis: 1, invert: true}}
-  - {input: {device: left, axis: 2}, modes: *base, action: {type: axis, device: left-vjoy, axis: 5}}
+  - {input: {device: left, axis: 2}, modes: *base, action: {type: axis, device: left-vjoy, axis: 5, invert: true}}
   - {input: {device: right, axis: 3}, modes: *base, action: {type: axis, device: right-vjoy, axis: 2}}
   - {input: {device: right, axis: 4}, modes: *base, action: {type: axis, device: right-vjoy, axis: 3, invert: true}}
   - {input: {device: right, axis: 5}, modes: *base, action: {type: axis, device: right-vjoy, axis: 4, invert: true}}
   - {input: {device: right, axis: 0}, modes: *base, action: {type: axis, device: right-vjoy, axis: 0}}
   - {input: {device: right, axis: 1}, modes: *base, action: {type: axis, device: right-vjoy, axis: 1}}
-  - {input: {device: right, axis: 2}, modes: *base, action: {type: axis, device: right-vjoy, axis: 5}}
+  - {input: {device: right, axis: 2}, modes: *base, action: {type: axis, device: right-vjoy, axis: 5, invert: true}}
 
   # Left trigger, A2, B1; the leftmod button itself has no virtual output.
   - {input: {device: left, button: 1}, modes: *base, action: {type: button, device: left-vjoy, button: 1}}
