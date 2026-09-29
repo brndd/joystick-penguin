@@ -35,10 +35,11 @@ private:
     int usageKind_ = 0;
     int usageScroll_ = 0;
     bool usageHidden_ = false;
+    QString renamedSelection_;
     void select();
     void clearDetail();
     void showUsage(const std::string& key, bool modifier, int scrollPosition);
-    bool commit(joystick_penguin::Config config, bool refreshAfter);
+    bool commit(joystick_penguin::Config config, bool refreshAfter, QString renamedKey = {});
     void add(int kind);
     void remove(const QString& key, int kind);
     void setStartupMode(const QString& key);

@@ -10,6 +10,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QEnterEvent>
 #include <QFileDialog>
 #include <QGroupBox>
@@ -167,7 +168,12 @@ void newProfileFromGui() {
     QTimer::singleShot(0, [] {
         auto* prompt = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
         check(prompt != nullptr, "device name prompt opened");
+        auto* ok = prompt->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+        check(!ok->isEnabled(), "empty controller name disables OK");
+        prompt->setTextValue("   ");
+        check(!ok->isEnabled(), "whitespace controller name disables OK");
         prompt->setTextValue("physical");
+        check(ok->isEnabled(), "named controller enables OK");
         prompt->accept();
     });
     button(fresh, "Create a physical device")->click();
@@ -189,7 +195,12 @@ void newProfileFromGui() {
     QTimer::singleShot(0, [] {
         auto* prompt = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         check(prompt != nullptr, "virtual device name prompt opened");
+        auto* ok = prompt->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+        check(!ok->isEnabled(), "empty virtual joystick name disables OK");
+        named<QLineEdit>(*prompt, "newVirtualName")->setText("  ");
+        check(!ok->isEnabled(), "whitespace virtual joystick name disables OK");
         named<QLineEdit>(*prompt, "newVirtualName")->setText("virtual");
+        check(ok->isEnabled(), "named virtual joystick enables OK");
         check(named<QComboBox>(*prompt, "virtualSourceDevice")->currentIndex() == 0,
               "virtual joystick can use default ranges without a physical device");
         prompt->accept();
@@ -450,6 +461,21 @@ void overhaul() {
     redo->trigger();
     QApplication::processEvents();
     check(named<QLineEdit>(*tabs->widget(1), "controllerPath")->text() == "/dev/input/by-id/offline-overhaul-test", "redo refreshes visible setup properties");
+    auto* physicalName = named<QLineEdit>(*tabs->widget(1), "setupName");
+    physicalName->setText("z-left");
+    finishEdit(physicalName);
+    check(devices->currentItem()->data(Qt::UserRole).toString() == "z-left" &&
+          named<QLineEdit>(*tabs->widget(1), "setupName")->text() == "z-left",
+          "renaming a controller keeps its detail page selected");
+    for (int i = 0; i < devices->count(); ++i)
+        if (devices->item(i)->data(Qt::UserRole).toString() == "left-vjoy") devices->setCurrentRow(i);
+    QApplication::processEvents();
+    auto* virtualName = named<QLineEdit>(*tabs->widget(1), "setupName");
+    virtualName->setText("z-left-vjoy");
+    finishEdit(virtualName);
+    check(devices->currentItem()->data(Qt::UserRole).toString() == "z-left-vjoy" &&
+          named<QLineEdit>(*tabs->widget(1), "setupName")->text() == "z-left-vjoy",
+          "renaming a virtual joystick keeps its detail page selected");
     tabs->setCurrentIndex(2);
     QApplication::processEvents();
     auto* conditions = named<QListWidget>(window, "workspaceModesModifiers");

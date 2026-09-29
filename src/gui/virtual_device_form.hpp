@@ -13,7 +13,7 @@ class QVBoxLayout;
 
 class VirtualDeviceForm : public QWidget {
 public:
-    using Commit = std::function<bool(joystick_penguin::Config, bool refreshAfter)>;
+    using Commit = std::function<bool(joystick_penguin::Config, bool refreshAfter, QString renamedKey)>;
     using Error = std::function<void(QString)>;
     VirtualDeviceForm(const joystick_penguin::Config& config, std::string key, Commit commit,
                       Error error, QWidget* parent = nullptr);

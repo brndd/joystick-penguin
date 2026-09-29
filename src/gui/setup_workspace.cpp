@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QAbstractButton>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -21,6 +22,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPalette>
+#include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QShowEvent>
@@ -72,7 +74,9 @@ void SetupWorkspace::showEvent(QShowEvent* event) {
 }
 
 void SetupWorkspace::refresh() {
-    QString selected = list_->currentItem() ? list_->currentItem()->data(Qt::UserRole).toString() : QString{};
+    QString selected = renamedSelection_.isEmpty() && list_->currentItem()
+        ? list_->currentItem()->data(Qt::UserRole).toString() : renamedSelection_;
+    renamedSelection_.clear();
     int type = list_->currentItem() ? list_->currentItem()->data(Qt::UserRole + 1).toInt() : 0;
     const int scrollPosition = list_->verticalScrollBar()->value();
     const QSignalBlocker blocker(list_);
@@ -145,7 +149,7 @@ void SetupWorkspace::refresh() {
     select();
 }
 
-bool SetupWorkspace::commit(Config config, bool refreshAfter) {
+bool SetupWorkspace::commit(Config config, bool refreshAfter, QString renamedKey) {
     try {
         // Setup can be used to repair an already-invalid mapping. Validate fields
         // here; profile-wide issues remain navigable in the shared issue panel.
@@ -153,6 +157,7 @@ bool SetupWorkspace::commit(Config config, bool refreshAfter) {
         validate_edited_config(fields);
         if (error) error(QString{});
         if (committed) committed(std::move(config));
+        if (!renamedKey.isEmpty()) renamedSelection_ = std::move(renamedKey);
         if (refreshAfter) QTimer::singleShot(0, this, [this] { refresh(); });
         return true;
     } catch (const ConfigError& failure) { if (error) error(qs(failure.what())); return false; }
@@ -171,10 +176,13 @@ void SetupWorkspace::select() {
     auto commitForm = [this](Config next, bool refreshAfter) { return commit(std::move(next), refreshAfter); };
     if (devices_) {
         if (!config_.devices.contains(key)) return;
+        auto commitDevice = [this](Config next, bool refreshAfter, QString renamedKey) {
+            return commit(std::move(next), refreshAfter, std::move(renamedKey));
+        };
         QWidget* deviceForm = modifier
-            ? static_cast<QWidget*>(new VirtualDeviceForm(config_, key, commitForm,
+            ? static_cast<QWidget*>(new VirtualDeviceForm(config_, key, commitDevice,
                 [this](QString message) { if (error) error(std::move(message)); }, properties_))
-            : static_cast<QWidget*>(new PhysicalDeviceForm(config_, key, commitForm, properties_));
+            : static_cast<QWidget*>(new PhysicalDeviceForm(config_, key, commitDevice, properties_));
         detail_->addWidget(deviceForm);
         deviceForm->show();
         return;
@@ -284,6 +292,11 @@ void SetupWorkspace::add(int kind) {
         layout->addLayout(form);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
         layout->addWidget(buttons);
+        auto* accept = buttons->button(QDialogButtonBox::Ok);
+        accept->setEnabled(false);
+        connect(name, &QLineEdit::textChanged, &dialog, [name, accept] {
+            accept->setEnabled(!name->text().trimmed().isEmpty());
+        });
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         if (dialog.exec() == QDialog::Accepted) {
@@ -292,7 +305,17 @@ void SetupWorkspace::add(int kind) {
             if (source->currentIndex() > 0) copiedAxes = detected.at(source->currentData().toInt()).axis_ranges;
         }
     } else {
-        enteredName = QInputDialog::getText(this, "Add", "Profile name", QLineEdit::Normal, {}, &ok).trimmed();
+        QInputDialog dialog(this);
+        dialog.setWindowTitle("Add");
+        dialog.setLabelText("Profile name");
+        dialog.setOkButtonText("OK");
+        auto* accept = dialog.findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+        accept->setEnabled(false);
+        connect(&dialog, &QInputDialog::textValueChanged, &dialog, [accept](const QString& text) {
+            accept->setEnabled(!text.trimmed().isEmpty());
+        });
+        ok = dialog.exec() == QDialog::Accepted;
+        enteredName = dialog.textValue().trimmed();
     }
     auto name = enteredName.toStdString();
     if (!ok || name.empty()) return;

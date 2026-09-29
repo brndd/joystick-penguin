@@ -152,7 +152,7 @@ void VirtualDeviceForm::buildAxisTable(QFormLayout* extra, QWidget* advancedFiel
             if (axes_->item(row, 0)->text().toInt() == code) return;
         auto next = proposed();
         next.devices.at(key_).axes[code] = axis_resolution(12, false);
-        if (commit_(std::move(next), true)) setEnabled(false);
+        if (commit_(std::move(next), true, {})) setEnabled(false);
     });
     connect(removeAxis, &QPushButton::clicked, this, [this] {
         const int row = axes_->currentRow();
@@ -161,7 +161,7 @@ void VirtualDeviceForm::buildAxisTable(QFormLayout* extra, QWidget* advancedFiel
         auto next = proposed();
         try { profile_setup::remove_axis(next, key_, code); }
         catch (const ConfigError& failure) { if (error_) error_(qs(failure.what())); return; }
-        if (commit_(std::move(next), true)) setEnabled(false);
+        if (commit_(std::move(next), true, {})) setEnabled(false);
     });
 }
 
@@ -169,20 +169,20 @@ void VirtualDeviceForm::connectEdits() {
     // Field edits stay in this form; each proposal starts from the current config.
     connect(display_, &QLineEdit::editingFinished, this, [this] {
         if (display_->text().trimmed().toStdString() != config_.devices.at(key_).virtual_name)
-            commit_(proposed(), false);
+            commit_(proposed(), false, {});
     });
-    connect(bus_, &QComboBox::currentIndexChanged, this, [this] { commit_(proposed(), false); });
-    connect(vendor_, &QSpinBox::valueChanged, this, [this] { commit_(proposed(), false); });
-    connect(product_, &QSpinBox::valueChanged, this, [this] { commit_(proposed(), false); });
+    connect(bus_, &QComboBox::currentIndexChanged, this, [this] { commit_(proposed(), false, {}); });
+    connect(vendor_, &QSpinBox::valueChanged, this, [this] { commit_(proposed(), false, {}); });
+    connect(product_, &QSpinBox::valueChanged, this, [this] { commit_(proposed(), false, {}); });
     for (int row = 0; row < axes_->rowCount(); ++row) {
-        auto changed = [this, row] { updateAxisRow(row); resizeAxisTable(); commit_(proposed(), false); };
+        auto changed = [this, row] { updateAxisRow(row); resizeAxisTable(); commit_(proposed(), false, {}); };
         connect(static_cast<QComboBox*>(axes_->cellWidget(row, 1)), &QComboBox::currentIndexChanged, this, changed);
         connect(static_cast<QComboBox*>(axes_->cellWidget(row, 2)), &QComboBox::currentIndexChanged, this, changed);
         connect(static_cast<QCheckBox*>(axes_->cellWidget(row, 4)), &QCheckBox::toggled, this, changed);
         for (auto* box : axes_->cellWidget(row, 3)->findChildren<QSpinBox*>())
             connect(box, &QSpinBox::valueChanged, this, [this, row] {
                 if (static_cast<QCheckBox*>(axes_->cellWidget(row, 4))->isChecked()) {
-                    updateAxisRow(row); resizeAxisTable(); commit_(proposed(), false);
+                    updateAxisRow(row); resizeAxisTable(); commit_(proposed(), false, {});
                 }
             });
     }
@@ -191,7 +191,7 @@ void VirtualDeviceForm::connectEdits() {
         if (newName == key_) return;
         auto next = proposed();
         profile_setup::rename_device(next, key_, newName);
-        if (commit_(std::move(next), true)) setEnabled(false);
+        if (commit_(std::move(next), true, qs(newName))) setEnabled(false);
     });
 }
 

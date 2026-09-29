@@ -11,7 +11,7 @@ class QLineEdit;
 // so a later field change cannot revert an earlier successful commit.
 class PhysicalDeviceForm : public QWidget {
 public:
-    using Commit = std::function<bool(joystick_penguin::Config, bool refreshAfter)>;
+    using Commit = std::function<bool(joystick_penguin::Config, bool refreshAfter, QString renamedKey)>;
     PhysicalDeviceForm(const joystick_penguin::Config& config, std::string key, Commit commit,
                        QWidget* parent = nullptr);
 private:
