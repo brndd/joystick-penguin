@@ -1,4 +1,5 @@
 #include "control_browser.hpp"
+#include "button_selector.hpp"
 #include <QApplication>
 #include <QEventLoop>
 #include <QLabel>
@@ -48,6 +49,16 @@ int main(int argc, char** argv) {
         config.devices.emplace("stick", Device{DeviceKind::Evdev, node, true, ""});
         config.modifiers.emplace("shift", std::vector<Control>{{"stick", ControlKind::Button, -1}});
         config.input_labels.push_back({{"stick", ControlKind::Button, -1}, "Trigger"});
+        ButtonSelector selector(config, ButtonSelector::Target::Physical);
+        selector.setDevice("stick", 1);
+        check(selector.count() == 1 && selector.currentText() == "Trigger (Button 1)",
+              "online selector lists only observed buttons with their physical label");
+        selector.setNumber(3, true);
+        check(selector.number() == 3 && selector.currentText().contains("unavailable"),
+              "existing unavailable indexed button stays visible");
+        selector.setDevice("stick", 3);
+        check(selector.count() == 1 && selector.number() == 1,
+              "changing controller drops an unavailable choice");
         ControlBrowser browser(config);
         browser.show(); wait();
         check(item(browser, "Trigger")->text(1).contains("Modifier"), "modifier-only control is identified");

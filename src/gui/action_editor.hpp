@@ -6,6 +6,7 @@
 #include <functional>
 
 class QCheckBox;
+class ButtonSelector;
 class QComboBox;
 class QSpinBox;
 class QWidget;
@@ -25,12 +26,14 @@ private:
     void visible(QWidget* widget, bool show);
     void updateFields();
     void updateAxes();
+    void updateButtons(bool preserveMissing = false);
 
     const joystick_penguin::Config& config_;
     QComboBox *type_, *device_, *buttonFormat_, *direction_, *mode_;
     QComboBox* outputAxis_;
     QComboBox* hatAxis_;
-    QSpinBox *button_, *axis_;
+    ButtonSelector* button_;
+    QSpinBox *buttonCode_, *axis_;
     QCheckBox* invert_;
     QCheckBox* literalHat_;
 };

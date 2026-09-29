@@ -5,6 +5,7 @@
 #include <functional>
 
 class ActionList;
+class ButtonSelector;
 class QCheckBox;
 class QComboBox;
 class QFormLayout;
@@ -46,7 +47,8 @@ private:
     QLabel *summary_, *issue_;
     QFormLayout* inputForm_;
     QComboBox *inputDevice_, *inputKind_, *buttonFormat_, *hatDirection_, *inputAxis_;
-    QSpinBox *inputButton_, *threshold_, *tapMs_;
+    ButtonSelector* inputButton_;
+    QSpinBox *inputButtonCode_, *threshold_, *tapMs_;
     QWidget* timingRow_;
     QListWidget *modes_, *modifiers_;
     QCheckBox* timed_;

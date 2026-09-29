@@ -1,5 +1,6 @@
 #include "binding_detail.hpp"
 #include "action_list.hpp"
+#include "button_selector.hpp"
 #include "control_browser.hpp"
 #include "mapping_model.hpp"
 
@@ -96,11 +97,16 @@ void BindingDetail::buildInputFields(QVBoxLayout* right) {
     inputKind_->addItems({"Button", "Absolute axis", "Hat direction"});
     inputForm_->addRow("Input type", inputKind_);
     buttonFormat_ = new QComboBox(this);
-    buttonFormat_->addItems({"One-based button number", "Literal EV_KEY code"});
+    buttonFormat_->setObjectName("inputButtonFormat");
+    buttonFormat_->addItems({"Button", "EV_KEY literal"});
     inputForm_->addRow("Button format", buttonFormat_);
-    inputButton_ = new QSpinBox(this);
+    inputButton_ = new ButtonSelector(document_.config(), ButtonSelector::Target::Physical, this);
     inputButton_->setObjectName("inputButton");
-    inputForm_->addRow("Button number / code", inputButton_);
+    inputForm_->addRow("Button", inputButton_);
+    inputButtonCode_ = new QSpinBox(this);
+    inputButtonCode_->setObjectName("inputButtonCode");
+    inputButtonCode_->setRange(BTN_MISC, KEY_MAX);
+    inputForm_->addRow("EV_KEY code", inputButtonCode_);
     inputAxis_ = new QComboBox(this);
     inputAxis_->setObjectName("inputAxis");
     inputForm_->addRow("Axis EV_ABS code", inputAxis_);
@@ -193,15 +199,20 @@ void BindingDetail::buildTiming(QVBoxLayout* right) {
 
 void BindingDetail::connectEdits() {
     // Form population is guarded by filling_ so these signals only record edits.
-    connect(inputDevice_, &QComboBox::currentIndexChanged, this, [this] { inputChanged(); });
+    connect(inputDevice_, &QComboBox::currentIndexChanged, this, [this] {
+        if (filling_) return;
+        inputButton_->setDevice(str(inputDevice_->currentText()), inputButton_->number());
+        inputChanged();
+    });
     connect(inputKind_, &QComboBox::currentIndexChanged, this, [this] { inputKindChanged(); });
     connect(buttonFormat_, &QComboBox::currentIndexChanged, this, [this] {
         if (filling_) return;
-        const bool indexed = buttonFormat_->currentIndex() == 0;
-        inputButton_->setRange(indexed ? 1 : BTN_MISC, indexed ? 255 : KEY_MAX);
+        showInputField(inputButton_, buttonFormat_->currentIndex() == 0);
+        showInputField(inputButtonCode_, buttonFormat_->currentIndex() != 0);
         inputChanged();
     });
-    connect(inputButton_, &QSpinBox::valueChanged, this, [this] { inputChanged(); });
+    connect(inputButton_, &QComboBox::currentIndexChanged, this, [this] { inputChanged(); });
+    connect(inputButtonCode_, &QSpinBox::valueChanged, this, [this] { inputChanged(); });
     connect(inputAxis_, &QComboBox::currentIndexChanged, this, [this] { inputChanged(); });
     connect(hatDirection_, &QComboBox::currentIndexChanged, this, [this] { inputChanged(); });
     connect(modes_, &QListWidget::itemChanged, this, [this] {
@@ -295,8 +306,9 @@ void BindingDetail::inputChanged() {
     input.device = str(inputDevice_->currentText());
     switch (inputKind_->currentIndex()) {
     case 0:
+        if (buttonFormat_->currentIndex() == 0 && inputButton_->number() <= 0) return;
         input.kind = ControlKind::Button;
-        input.code = buttonFormat_->currentIndex() ? inputButton_->value() : -inputButton_->value();
+        input.code = buttonFormat_->currentIndex() ? inputButtonCode_->value() : -inputButton_->number();
         input.direction = 0;
         break;
     case 1:
@@ -342,7 +354,8 @@ void BindingDetail::inputKindChanged() {
     showInputField(inputAxis_, inputKind_->currentIndex() != 0);
     showInputField(hatDirection_, inputKind_->currentIndex() == 2);
     showInputField(buttonFormat_, inputKind_->currentIndex() == 0);
-    showInputField(inputButton_, inputKind_->currentIndex() == 0);
+    showInputField(inputButton_, inputKind_->currentIndex() == 0 && buttonFormat_->currentIndex() == 0);
+    showInputField(inputButtonCode_, inputKind_->currentIndex() == 0 && buttonFormat_->currentIndex() != 0);
     inputChanged();
     refresh();
 }
@@ -364,13 +377,14 @@ void BindingDetail::refresh() {
     inputKind_->setCurrentIndex(kind);
     const bool indexed = binding.input.code < 0 && kind == 0;
     buttonFormat_->setCurrentIndex(indexed ? 0 : 1);
-    inputButton_->setRange(indexed ? 1 : BTN_MISC, indexed ? 255 : KEY_MAX);
-    if (kind == 0) inputButton_->setValue(indexed ? -binding.input.code : binding.input.code);
+    inputButton_->setDevice(binding.input.device, indexed ? -binding.input.code : 1, indexed);
+    if (kind == 0 && !indexed) inputButtonCode_->setValue(binding.input.code);
     updateAxisCodes();
     if (kind != 0) inputAxis_->setCurrentIndex(inputAxis_->findData(binding.input.code));
     hatDirection_->setCurrentIndex(binding.input.direction < 0 ? 0 : 1);
     showInputField(buttonFormat_, kind == 0);
-    showInputField(inputButton_, kind == 0);
+    showInputField(inputButton_, kind == 0 && indexed);
+    showInputField(inputButtonCode_, kind == 0 && !indexed);
     showInputField(inputAxis_, kind != 0);
     showInputField(hatDirection_, kind == 2);
     populateChecks(modes_, config.modes, binding.modes);

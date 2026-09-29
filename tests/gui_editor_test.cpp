@@ -1,5 +1,6 @@
 #include "editor.hpp"
 #include "control_browser.hpp"
+#include "button_selector.hpp"
 #include "setup_workspace.hpp"
 #include "joystick_penguin/joystick_preset.hpp"
 
@@ -105,7 +106,10 @@ void addAction(QWidget& window, int type, int code = 0) {
     auto* editor = named<QGroupBox>(window, "inlineActionEditor");
     auto* kinds = named<QComboBox>(*editor, "actionType");
     kinds->setCurrentIndex(kinds->findData(type));
-    if (type == 0) named<QSpinBox>(*editor, "actionButton")->setValue(code);
+    if (type == 0 && code) {
+        auto* choice = named<QComboBox>(*editor, "actionButton");
+        choice->setCurrentIndex(choice->findData(code));
+    }
     if (type == 1) named<QSpinBox>(*editor, "actionAxis")->setValue(code);
     if (type == 2) {
         auto* axes = named<QComboBox>(*editor, "actionOutputAxis");
@@ -275,7 +279,7 @@ void newProfileFromGui() {
     });
     toolButton(fresh, "Add held modifier")->click();
     QApplication::processEvents();
-    named<QSpinBox>(fresh, "modifierButton")->setValue(4);
+    named<QComboBox>(fresh, "modifierButton")->setCurrentIndex(3);
     QApplication::processEvents();
     auto* modifierName = named<QLineEdit>(*tabs->widget(2), "setupName");
     modifierName->setText("shifted");
@@ -298,15 +302,24 @@ void newProfileFromGui() {
     button(*tabs->widget(2), "Add button")->click();
     QApplication::processEvents();
     check(fresh.config().modifiers.at("shift").size() == 2, "modifier accepts an additional button");
-    auto inputs = tabs->widget(2)->findChildren<QSpinBox*>("modifierButton");
+    auto inputs = tabs->widget(2)->findChildren<QComboBox*>("modifierButton");
     check(inputs.size() == 2, "each modifier button has its own editor");
-    inputs.at(1)->setValue(2);
+    check(inputs.at(0)->count() == 255 && inputs.at(0)->toolTip().contains("unverified"),
+          "offline physical selector permits unverified indexed buttons");
+    inputs.at(1)->setCurrentIndex(1);
     check(fresh.config().modifiers.at("shift")[1].code == -2, "second modifier button is editable");
+    auto* secondFormat = inputs.at(1)->parentWidget()->findChild<QComboBox*>("modifierButtonFormat");
+    secondFormat->setCurrentIndex(1);
+    auto* secondCode = named<QSpinBox>(*inputs.at(1)->parentWidget(), "modifierButtonCode");
+    secondCode->setValue(BTN_TRIGGER);
+    check(fresh.config().modifiers.at("shift")[1].code == BTN_TRIGGER, "modifier EV_KEY literal remains editable");
+    secondFormat->setCurrentIndex(0);
+    check(fresh.config().modifiers.at("shift")[1].code == -2, "indexed modifier selection survives format switching");
     auto removes = tabs->widget(2)->findChildren<QPushButton*>();
     for (auto* candidate : removes)
         if (candidate->text() == "Remove button" && candidate->isVisible()) {
             // Remove the second row without changing the first assignment.
-            if (candidate->parentWidget()->findChild<QSpinBox*>() == inputs.at(1)) candidate->click();
+            if (candidate->parentWidget()->findChild<QComboBox*>("modifierButton") == inputs.at(1)) candidate->click();
         }
     QApplication::processEvents();
     check(fresh.config().modifiers.at("shift").size() == 1 &&
@@ -368,6 +381,25 @@ void newProfileFromGui() {
     checkProcess.start(CLI_PATH, {"--check", QString::fromStdString(path.string())});
     check(checkProcess.waitForFinished(10000) && checkProcess.exitCode() == 0,
           "New profile passes --check without YAML edits");
+}
+
+void offlineButtonChoices() {
+    Config config;
+    config.devices.emplace("stick", Device{DeviceKind::Evdev, "/dev/input/by-id/absent-button-selector", true, ""});
+    config.devices.emplace("vjoy", Device{DeviceKind::Uinput, "", true, "joystick"});
+    config.input_labels.push_back({{"stick", ControlKind::Button, -4}, "Trigger"});
+    config.input_labels.push_back({{"stick", ControlKind::Button, BTN_TRIGGER}, "Raw trigger"});
+    ButtonSelector physical(config, ButtonSelector::Target::Physical);
+    physical.setDevice("stick", 4);
+    check(physical.count() == 255 && physical.currentText() == "Trigger (Button 4)" &&
+          physical.itemText(0) == "Button 1" && !physical.currentText().contains("Raw trigger"),
+          "offline indexed choices use only their exact physical labels");
+    physical.setNumber(255);
+    check(physical.number() == 255, "offline dropdown allows the maximum supported indexed button");
+    ButtonSelector output(config, ButtonSelector::Target::Virtual);
+    output.setDevice("vjoy", 79);
+    check(output.count() == joystick_button_count && output.number() == 79 &&
+          output.currentText() == "Button 79", "virtual selector uses its own preset without physical labels");
 }
 
 void overhaul() {
@@ -661,6 +693,7 @@ void deviceRemovalFromGui() {
 }
 
 void run() {
+    offlineButtonChoices();
     { EditorWindow defaultWindow; check(defaultWindow.size() == QSize(1600, 900), "initial window is 1600x900"); }
     overhaul();
     newProfileFromGui();
@@ -697,6 +730,9 @@ void run() {
     std::filesystem::copy_file(std::filesystem::path(EXAMPLES_DIR) / "basic.yaml", profile);
     check(window.openProfile(QString::fromStdString(profile.string())), "open editable profile");
     selectAllControls(window);
+    auto* physicalButtons = named<QComboBox>(window, "inputButton");
+    check(physicalButtons->count() == 255 && physicalButtons->toolTip().contains("unverified"),
+          "offline mapping selector exposes the full unverified indexed range");
     check(table->model()->rowCount() == 2, "initial bindings");
     search->setText("button 1");
     check(table->model()->rowCount() == 2, "search by control");
@@ -705,9 +741,14 @@ void run() {
     search->clear();
     table->setCurrentIndex(table->model()->index(0, 0));
     QApplication::processEvents();
-    named<QSpinBox>(window, "inputButton")->setValue(2);
+    physicalButtons->setCurrentIndex(1);
     QApplication::processEvents();
     check(window.config().bindings[0].input.code == -2, "one-based physical button edited");
+    named<QComboBox>(window, "inputButtonFormat")->setCurrentIndex(1);
+    named<QSpinBox>(window, "inputButtonCode")->setValue(BTN_TRIGGER);
+    check(window.config().bindings[0].input.code == BTN_TRIGGER, "mapping EV_KEY literal remains editable");
+    named<QComboBox>(window, "inputButtonFormat")->setCurrentIndex(0);
+    check(window.config().bindings[0].input.code == -2, "mapping indexed choice survives format switching");
     button(window, "Duplicate")->click();
     QApplication::processEvents();
     check(table->model()->rowCount() == 3 && error->text().contains("conflicts"),
@@ -727,6 +768,19 @@ void run() {
     table->setCurrentIndex(table->model()->index(0, 0));
     QApplication::processEvents();
     addAction(window, 0, 3);
+    {
+        auto* editor = named<QGroupBox>(window, "inlineActionEditor");
+        auto* outputButtons = named<QComboBox>(*editor, "actionButton");
+        check(outputButtons->count() == joystick_button_count && outputButtons->currentData() == 3,
+              "virtual output selector contains exactly the preset buttons");
+        named<QComboBox>(*editor, "actionButtonFormat")->setCurrentIndex(1);
+        named<QSpinBox>(*editor, "actionButtonCode")->setValue(BTN_TRIGGER);
+        check(std::get<ButtonAction>(window.config().bindings[0].actions.back()).code == BTN_TRIGGER,
+              "action EV_KEY literal remains editable");
+        named<QComboBox>(*editor, "actionButtonFormat")->setCurrentIndex(0);
+        check(std::get<ButtonAction>(window.config().bindings[0].actions.back()).code == joystick_button_code(3),
+              "output indexed choice survives format switching");
+    }
     addAction(window, 3);
     check(window.config().bindings[0].actions.size() == 3, "multiple outputs and mode action");
     check(named<QTableWidget>(window, "actionList")->item(0, 1)->text() == "Immediate",
@@ -791,7 +845,7 @@ void run() {
           window.config().bindings[0].tap_hold->hold.size() == 4, "both branches edited");
     check(actions->currentRow() == 0 && named<QGroupBox>(window, "inlineActionEditor")->isVisible(),
           "moved action is selected for editing after rebuilding the list");
-    named<QSpinBox>(*named<QGroupBox>(window, "inlineActionEditor"), "actionButton")->setValue(7);
+    named<QComboBox>(*named<QGroupBox>(window, "inlineActionEditor"), "actionButton")->setCurrentIndex(6);
     check(std::get<ButtonAction>(window.config().bindings[0].tap_hold->tap.front()).code == joystick_button_code(7),
           "editing the selected moved action writes to its new branch");
     check(actions->rowCount() == 5 &&

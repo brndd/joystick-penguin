@@ -1,4 +1,5 @@
 #include "action_editor.hpp"
+#include "button_selector.hpp"
 #include "control_browser.hpp"
 
 #include "joystick_penguin/joystick_preset.hpp"
@@ -53,11 +54,16 @@ ActionEditor::ActionEditor(const Config& config, ControlKind input, Action origi
     populate(device_, config);
     form->addRow("Output device", device_);
     buttonFormat_ = new QComboBox(this);
-    buttonFormat_->addItems({"Preset button number (1–79)", "Literal EV_KEY code"});
+    buttonFormat_->setObjectName("actionButtonFormat");
+    buttonFormat_->addItems({"Button", "EV_KEY literal"});
     form->addRow("Button format", buttonFormat_);
-    button_ = new QSpinBox(this);
+    button_ = new ButtonSelector(config, ButtonSelector::Target::Virtual, this);
     button_->setObjectName("actionButton");
-    form->addRow("Button number / code", button_);
+    form->addRow("Button", button_);
+    buttonCode_ = new QSpinBox(this);
+    buttonCode_->setObjectName("actionButtonCode");
+    buttonCode_->setRange(BTN_MISC, KEY_MAX);
+    form->addRow("EV_KEY code", buttonCode_);
     axis_ = new QSpinBox(this);
     axis_->setObjectName("actionAxis");
     axis_->setRange(0, ABS_MAX);
@@ -86,8 +92,9 @@ ActionEditor::ActionEditor(const Config& config, ControlKind input, Action origi
     form->addRow("Mode", mode_);
     connect(type_, &QComboBox::currentIndexChanged, this, [this] { updateFields(); notifyChanged(); });
     connect(buttonFormat_, &QComboBox::currentIndexChanged, this, [this] { updateFields(); notifyChanged(); });
-    connect(device_, &QComboBox::currentIndexChanged, this, [this] { updateAxes(); notifyChanged(); });
-    connect(button_, &QSpinBox::valueChanged, this, [this] { notifyChanged(); });
+    connect(device_, &QComboBox::currentIndexChanged, this, [this] { updateAxes(); updateButtons(); notifyChanged(); });
+    connect(button_, &QComboBox::currentIndexChanged, this, [this] { notifyChanged(); });
+    connect(buttonCode_, &QSpinBox::valueChanged, this, [this] { notifyChanged(); });
     connect(axis_, &QSpinBox::valueChanged, this, [this] { notifyChanged(); });
     connect(hatAxis_, &QComboBox::currentIndexChanged, this, [this] { notifyChanged(); });
     connect(literalHat_, &QCheckBox::toggled, this, [this] { notifyChanged(); });
@@ -104,7 +111,9 @@ ActionEditor::ActionEditor(const Config& config, ControlKind input, Action origi
             if constexpr (std::is_same_v<T, ButtonAction>) {
                 int number = buttonNumber(value.code);
                 buttonFormat_->setCurrentIndex(number ? 0 : 1);
-                button_->setValue(number ? number : value.code);
+                updateButtons();
+                if (number) button_->setNumber(number);
+                else buttonCode_->setValue(value.code);
             } else if constexpr (std::is_same_v<T, HatAction>) {
                 axis_->setValue(value.code);
                 direction_->setCurrentIndex(value.direction < 0 ? 0 : 1);
@@ -115,6 +124,7 @@ ActionEditor::ActionEditor(const Config& config, ControlKind input, Action origi
         }
     }, original);
     updateFields();
+    updateButtons(true);
 }
 
 Action ActionEditor::result() const {
@@ -123,7 +133,7 @@ Action ActionEditor::result() const {
     const auto device = str(device_->currentText());
     if (type == 0)
         return ButtonAction{device, buttonFormat_->currentIndex() == 0
-                                        ? joystick_button_code(button_->value()) : button_->value()};
+                                        ? joystick_button_code(button_->number()) : buttonCode_->value()};
     if (type == 1) return HatAction{device, axis_->value(), direction_->currentData().toInt()};
     return AxisAction{device, outputAxis_->currentData().toInt(), invert_->isChecked()};
 }
@@ -139,7 +149,8 @@ void ActionEditor::updateFields() {
     const int type = type_->currentData().toInt();
     visible(device_, type != 3);
     visible(buttonFormat_, type == 0);
-    visible(button_, type == 0);
+    visible(button_, type == 0 && buttonFormat_->currentIndex() == 0);
+    visible(buttonCode_, type == 0 && buttonFormat_->currentIndex() != 0);
     visible(axis_, type == 1 && literalHat_->isChecked());
     visible(hatAxis_, type == 1);
     visible(literalHat_, type == 1);
@@ -147,13 +158,13 @@ void ActionEditor::updateFields() {
     visible(direction_, type == 1);
     visible(invert_, type == 2);
     visible(mode_, type == 3);
-    if (type == 0) {
-        const bool indexed = buttonFormat_->currentIndex() == 0;
-        button_->setRange(indexed ? 1 : BTN_MISC, indexed ? joystick_button_count : KEY_MAX);
-    }
     if (type == 1) axis_->setRange(ABS_HAT0X, ABS_HAT3Y);
     else axis_->setRange(0, ABS_MAX);
     updateAxes();
+}
+
+void ActionEditor::updateButtons(bool preserveMissing) {
+    button_->setDevice(str(device_->currentText()), button_->number(), preserveMissing);
 }
 
 void ActionEditor::updateAxes() {

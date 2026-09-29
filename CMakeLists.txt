@@ -47,7 +47,7 @@ if(JP_BUILD_GUI)
         src/gui/binding_detail.cpp src/gui/profile_document.cpp
         src/gui/setup_model.cpp src/gui/discovery.cpp src/gui/control_browser.cpp src/gui/setup_workspace.cpp
         src/gui/physical_device_form.cpp src/gui/virtual_device_form.cpp src/gui/condition_forms.cpp
-        src/gui/mapping_model.cpp)
+        src/gui/mapping_model.cpp src/gui/button_selector.cpp)
     add_executable(joystick-penguin-gui src/gui/main.cpp ${JP_GUI_SOURCES})
     target_link_libraries(joystick-penguin-gui PRIVATE joystick_penguin_core Qt6::Widgets PkgConfig::LIBEVDEV)
     target_compile_options(joystick-penguin-gui PRIVATE -Wall -Wextra -Wpedantic)
@@ -105,7 +105,7 @@ if(BUILD_TESTING)
             CLI_PATH="$<TARGET_FILE:joystick-penguin>")
         add_test(NAME gui_editor COMMAND gui_editor_tests)
         set_tests_properties(gui_editor PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
-        add_executable(control_browser_tests tests/control_browser_test.cpp src/gui/control_browser.cpp)
+        add_executable(control_browser_tests tests/control_browser_test.cpp src/gui/control_browser.cpp src/gui/button_selector.cpp)
         target_include_directories(control_browser_tests PRIVATE src/gui)
         target_link_libraries(control_browser_tests PRIVATE joystick_penguin_core Qt6::Widgets PkgConfig::LIBEVDEV)
         add_test(NAME control_browser COMMAND control_browser_tests)

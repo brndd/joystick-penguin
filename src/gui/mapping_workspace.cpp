@@ -117,6 +117,7 @@ MappingWorkspace::MappingWorkspace(ProfileDocument& document, QWidget* parent)
             const auto visible = proxy_->mapFromSource(model_->index(selectedRow, 0));
             if (visible.isValid()) table_->setCurrentIndex(visible);
         }
+        detail_->refresh();
         refreshBinding();
     };
     // The detail owns its input, condition, timing, and action editors.

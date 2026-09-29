@@ -7,6 +7,7 @@
 class QComboBox;
 class QLineEdit;
 class QSpinBox;
+class ButtonSelector;
 
 using SetupCommit = std::function<bool(joystick_penguin::Config, bool refreshAfter)>;
 
@@ -28,6 +29,7 @@ private:
     QLineEdit* name_;
     struct ButtonRow {
         QComboBox *controller, *format;
+        ButtonSelector* button;
         QSpinBox* code;
     };
     std::vector<ButtonRow> rows_;

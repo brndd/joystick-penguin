@@ -1,4 +1,5 @@
 #include "condition_forms.hpp"
+#include "button_selector.hpp"
 #include "control_browser.hpp"
 #include "setup_model.hpp"
 
@@ -54,28 +55,41 @@ ModifierForm::ModifierForm(const Config& config, std::string key, SetupCommit co
         auto* controller = new QComboBox(row);
         for (const auto& [id, device] : config_.devices)
             if (device.kind == DeviceKind::Evdev) controller->addItem(qs(id));
+        if (controller->findText(qs(input.device)) < 0) controller->addItem(qs(input.device));
         controller->setCurrentText(qs(input.device));
         auto* format = new QComboBox(row);
-        format->addItems({"Button number", "EV_KEY literal"});
+        format->setObjectName("modifierButtonFormat");
+        format->addItems({"Button", "EV_KEY literal"});
         format->setCurrentIndex(input.code < 0 ? 0 : 1);
+        auto* button = new ButtonSelector(config_, ButtonSelector::Target::Physical, row);
+        button->setObjectName("modifierButton");
+        button->setDevice(input.device, input.code < 0 ? -input.code : 1, input.code < 0);
         auto* code = new QSpinBox(row);
-        code->setRange(input.code < 0 ? 1 : BTN_MISC, input.code < 0 ? 255 : KEY_MAX);
-        code->setValue(input.code < 0 ? -input.code : input.code);
-        code->setObjectName("modifierButton");
+        code->setRange(BTN_MISC, KEY_MAX);
+        if (input.code > 0) code->setValue(input.code);
+        code->setObjectName("modifierButtonCode");
+        button->setVisible(input.code < 0);
+        code->setVisible(input.code > 0);
         auto* usage = new QPushButton("↩ Show control", row);
         auto* remove = new QPushButton("Remove button", row);
         fields->addWidget(controller);
         fields->addWidget(format);
+        fields->addWidget(button);
         fields->addWidget(code);
         fields->addWidget(usage);
         fields->addWidget(remove);
         list->addWidget(row);
-        rows_.push_back({controller, format, code});
-        connect(format, &QComboBox::currentIndexChanged, code, [format, code] {
-            code->setRange(format->currentIndex() ? BTN_MISC : 1, format->currentIndex() ? KEY_MAX : 255);
+        rows_.push_back({controller, format, button, code});
+        connect(format, &QComboBox::currentIndexChanged, this, [this, format, button, code] {
+            button->setVisible(format->currentIndex() == 0);
+            code->setVisible(format->currentIndex() != 0);
+            commit_(proposed(), false);
         });
-        connect(controller, &QComboBox::currentIndexChanged, this, [this] { commit_(proposed(), false); });
-        connect(format, &QComboBox::currentIndexChanged, this, [this] { commit_(proposed(), false); });
+        connect(controller, &QComboBox::currentIndexChanged, this, [this, controller, button] {
+            button->setDevice(controller->currentText().toStdString(), button->number());
+            if (button->number() > 0) commit_(proposed(), false);
+        });
+        connect(button, &QComboBox::currentIndexChanged, this, [this] { commit_(proposed(), false); });
         connect(code, &QSpinBox::valueChanged, this, [this] { commit_(proposed(), false); });
         connect(usage, &QPushButton::clicked, this, [this, i, showControl] {
             if (showControl) showControl(proposed().modifiers.at(key_).at(i));
@@ -121,6 +135,6 @@ Config ModifierForm::proposed() const {
     inputs.clear();
     for (const auto& row : rows_)
         inputs.push_back({row.controller->currentText().toStdString(), ControlKind::Button,
-                          row.format->currentIndex() ? row.code->value() : -row.code->value()});
+                          row.format->currentIndex() ? row.code->value() : -row.button->number()});
     return next;
 }
