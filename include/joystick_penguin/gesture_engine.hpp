@@ -85,6 +85,7 @@ private:
     std::set<Key> hat_inputs_;
     std::set<Key> axis_inputs_;
     std::set<std::string> held_modifiers_;
+    std::map<std::string, std::size_t> held_modifier_counts_;
     std::map<Key, Gesture> down_;
     std::map<Key, HatState> hats_;
     std::map<Key, AxisState> axes_;

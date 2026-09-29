@@ -95,7 +95,7 @@ concurrently with the engine.
 ### 4.1 Persistent modes and held modifiers
 
 A **persistent mode** is a named operating context selected by configuration. A
-**modifier** is a physical control whose held state affects the selection of
+**modifier** is a named set of physical buttons whose held state affects the selection of
 *new* gestures. Pressing or releasing a modifier is **not** a mode change and
 must not, by itself, cancel an existing captured output.
 
@@ -105,6 +105,8 @@ until their physical releases, even if their bindings are invalid in the new
 mode. A physical control still held across that change does not automatically
 activate a replacement binding. Active axes immediately reroute to bindings in
 the new mode using their cached physical positions.
+Any assigned button activates its modifier; it stays active until all assigned
+buttons are released. A modifier with no assigned buttons remains inactive.
 
 A modifier control may also have its own output binding. Select that binding
 from the modifier state **before** its own press is added to the held set;
@@ -243,7 +245,7 @@ modes:
 
 modifiers:
   shift:
-    input: {device: controller_a, button: 4}
+    inputs: [{device: controller_a, button: 4}, {device: controller_b, button: 6}]
 
 bindings:
   - input: {device: controller_a, button: 5}

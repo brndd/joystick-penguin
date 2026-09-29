@@ -210,18 +210,26 @@ void parse_modes(const YAML::Node& node, Config& config) {
     config.modes = names(required(node, "names", "modes"), "modes.names");
 }
 
-std::map<std::string, Control> parse_modifiers(const YAML::Node& node) {
-    std::map<std::string, Control> modifiers;
+std::map<std::string, std::vector<Control>> parse_modifiers(const YAML::Node& node) {
+    std::map<std::string, std::vector<Control>> modifiers;
     if (!node) return modifiers;
     expect_map(node, "modifiers");
     for (const auto& entry : node) {
         const auto name = text(entry.first, "modifier name");
         if (modifiers.count(name)) throw ConfigError("duplicate modifier '" + name + "'");
         const auto where = "modifiers." + name;
-        keys(entry.second, where, {"input"});
-        auto input = input_control(required(entry.second, "input", where), where + ".input");
-        if (input.kind != ControlKind::Button) throw ConfigError(where + " must use a button");
-        modifiers.emplace(name, std::move(input));
+        keys(entry.second, where, {"inputs"});
+        const auto inputs = required(entry.second, "inputs", where);
+        expect_sequence(inputs, where + ".inputs");
+        std::vector<Control> controls;
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            auto input = input_control(inputs[i], where + ".inputs[" + std::to_string(i) + "]");
+            if (input.kind != ControlKind::Button) throw ConfigError(where + " must use buttons");
+            if (std::find(controls.begin(), controls.end(), input) != controls.end())
+                throw ConfigError(where + " repeats a button");
+            controls.push_back(std::move(input));
+        }
+        modifiers.emplace(name, std::move(controls));
     }
     return modifiers;
 }
@@ -389,8 +397,7 @@ void validate_binding(const Config& config, std::size_t index) {
         const auto found = config.modifiers.find(modifier);
         if (found == config.modifiers.end())
             throw ConfigError(where + " references unknown modifier '" + modifier + "'");
-        if (found->second.device == binding.input.device &&
-            found->second.code == binding.input.code)
+        if (std::find(found->second.begin(), found->second.end(), binding.input) != found->second.end())
             throw ConfigError(where + " cannot require its own modifier '" + modifier + "'");
     }
 }
@@ -415,8 +422,9 @@ void validate_config(const Config& config) {
     if (!contains(config.modes, config.initial_mode))
         throw ConfigError("modes.initial is not listed in modes.names");
 
-    for (const auto& [name, input] : config.modifiers)
-        check_device(config, input.device, DeviceKind::Evdev, "modifiers." + name);
+    for (const auto& [name, inputs] : config.modifiers)
+        for (const auto& input : inputs)
+            check_device(config, input.device, DeviceKind::Evdev, "modifiers." + name);
 
     for (std::size_t i = 0; i < config.input_labels.size(); ++i) {
         const auto& label = config.input_labels[i];

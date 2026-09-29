@@ -113,8 +113,11 @@ std::string emit_config(const Config& config) {
     root["modes"]["initial"] = config.initial_mode;
     root["modes"]["names"] = strings(config.modes);
     YAML::Node modifiers(YAML::NodeType::Map);
-    for (const auto& [name, input] : config.modifiers)
-        modifiers[name]["input"] = control(input);
+    for (const auto& [name, inputs] : config.modifiers) {
+        YAML::Node entries(YAML::NodeType::Sequence);
+        for (const auto& input : inputs) entries.push_back(control(input));
+        modifiers[name]["inputs"] = entries;
+    }
     root["modifiers"] = modifiers;
     if (!config.input_labels.empty()) {
         YAML::Node labels(YAML::NodeType::Sequence);

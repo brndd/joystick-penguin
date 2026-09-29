@@ -43,11 +43,12 @@ GestureEngine::GestureEngine(const Config& config, const Clock& clock)
                 neutrals_.emplace(target, range.neutral);
             }
 
-    for (const auto& [name, input] : config.modifiers) {
-        if (input.kind != ControlKind::Button)
-            throw ConfigError("modifier '" + name + "' must use a button");
-        modifiers_by_input_[{input.device, input.code}].push_back(name);
-    }
+    for (const auto& [name, inputs] : config.modifiers)
+        for (const auto& input : inputs) {
+            if (input.kind != ControlKind::Button)
+                throw ConfigError("modifier '" + name + "' must use a button");
+            modifiers_by_input_[{input.device, input.code}].push_back(name);
+        }
 
     // Index bindings by physical control while retaining the selected binding's
     // index in each gesture for later cleanup and eventual mode transitions.
@@ -224,7 +225,11 @@ void GestureEngine::release_button(const Key& source, OutputChanges& changes) {
     down_.erase(gesture);
     if (const auto modifiers = modifiers_by_input_.find(source); modifiers != modifiers_by_input_.end()) {
         const auto previous = held_modifiers_;
-        for (const auto& name : modifiers->second) held_modifiers_.erase(name);
+        for (const auto& name : modifiers->second)
+            if (--held_modifier_counts_.at(name) == 0) {
+                held_modifier_counts_.erase(name);
+                held_modifiers_.erase(name);
+            }
         reroute_axes(previous, mode_, changes);
     }
 }
@@ -336,7 +341,11 @@ void GestureEngine::release_device(const std::string& device, OutputChanges& cha
         end_gesture(it->second, changes);
         if (const auto modifiers = modifiers_by_input_.find(it->first);
             modifiers != modifiers_by_input_.end())
-            for (const auto& name : modifiers->second) held_modifiers_.erase(name);
+            for (const auto& name : modifiers->second)
+                if (--held_modifier_counts_.at(name) == 0) {
+                    held_modifier_counts_.erase(name);
+                    held_modifiers_.erase(name);
+                }
         it = down_.erase(it);
     }
     for (auto it = hats_.begin(); it != hats_.end();) {
@@ -367,7 +376,8 @@ std::vector<OutputEvent> GestureEngine::process(const InputEvent& event) {
             if (const auto modifiers = modifiers_by_input_.find(source);
                 modifiers != modifiers_by_input_.end()) {
                 const auto previous = held_modifiers_;
-                for (const auto& name : modifiers->second) held_modifiers_.insert(name);
+                for (const auto& name : modifiers->second)
+                    if (held_modifier_counts_[name]++ == 0) held_modifiers_.insert(name);
                 reroute_axes(previous, mode_, changes);
             }
         }
@@ -386,6 +396,7 @@ std::vector<OutputEvent> GestureEngine::release_all() {
     for (const auto& [source, gesture] : down_) end_gesture(gesture, changes);
     down_.clear();
     held_modifiers_.clear();
+    held_modifier_counts_.clear();
     for (const auto& [source, state] : hats_)
         if (state.gesture) end_gesture(*state.gesture, changes);
     hats_.clear();

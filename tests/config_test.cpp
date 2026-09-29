@@ -22,7 +22,7 @@ devices:
   virtual: {kind: uinput, preset: joystick}
 modes: {initial: default, names: [default, alternate]}
 modifiers:
-  shift: {input: {device: physical, button: 4}}
+  shift: {inputs: [{device: physical, button: 4}]}
 bindings:
   - input: {device: physical, button: 1}
     modes: [default, alternate]
@@ -70,7 +70,7 @@ void run() {
     const auto controls_example = load_config_file(CONTROLS_PROFILE);
     check(example.devices.size() == 2 && example.bindings.size() == 2,
           "example profile should load from disk");
-    check(gesture_example.modifiers.at("shift").code == -5 &&
+    check(gesture_example.modifiers.at("shift").front().code == -5 &&
           gesture_example.bindings.size() == 5 && gesture_example.bindings[4].actions.size() == 2,
           "manual gesture profile should load from disk");
     check(controls_example.devices.at("virtual_stick").axes.at(2).maximum == 255 &&
@@ -93,7 +93,18 @@ void run() {
     check(config.devices.at("virtual").bus == VirtualBus::Usb, "default virtual joystick uses USB bus identity");
     check(!config.devices.at("shared").grab, "explicit shared device");
     check(config.initial_mode == "default", "initial mode");
-    check(config.modifiers.at("shift").code == -4, "modifier index");
+    check(config.modifiers.at("shift").front().code == -4, "modifier index");
+    const auto multipleInputs = replace(profile, "inputs: [{device: physical, button: 4}]",
+        "inputs: [{device: physical, button: 4}, {device: shared, button: 5}]");
+    check(load_config(multipleInputs).modifiers.at("shift").size() == 2,
+          "modifier accepts buttons from multiple controllers");
+    rejected(replace(profile, "inputs: [{device: physical, button: 4}]",
+        "inputs: [{device: physical, button: 4}, {device: physical, button: 4}]"), "repeats a button");
+    rejected(replace(profile, "inputs: [{device: physical, button: 4}]",
+        "inputs: [{device: physical, axis: 0}]"), "must use buttons");
+    const auto orphan = load_config(replace(profile, "inputs: [{device: physical, button: 4}]", "inputs: []"));
+    check(orphan.modifiers.at("shift").empty() && load_config(serialize_config(orphan)) == orphan,
+          "unassigned modifier remains valid and round trips with dependent mappings");
     check(config.bindings[0].actions.size() == 1 &&
           std::get<ButtonAction>(config.bindings[0].actions[0]).code == 289,
           "output code");
@@ -197,9 +208,9 @@ void run() {
                      "modes: [default]\n    modifiers: [shift]"),
              "conflicts with bindings[1]");
     const auto two_modifiers = replace(profile,
-        "  shift: {input: {device: physical, button: 4}}\nbindings:",
-        "  shift: {input: {device: physical, button: 4}}\n"
-        "  layer: {input: {device: shared, button: 5}}\nbindings:");
+        "  shift: {inputs: [{device: physical, button: 4}]}\nbindings:",
+        "  shift: {inputs: [{device: physical, button: 4}]}\n"
+        "  layer: {inputs: [{device: shared, button: 5}]}\nbindings:");
     rejected(two_modifiers +
               "  - input: {device: physical, button: 1}\n"
              "    modes: [default]\n    modifiers: [layer]\n"

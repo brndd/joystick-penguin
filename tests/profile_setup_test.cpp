@@ -4,10 +4,12 @@
 #include "joystick_penguin/joystick_preset.hpp"
 
 #include <filesystem>
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unistd.h>
 #include <vector>
 
@@ -55,7 +57,7 @@ void run() {
     profile_setup::rename_device(config, "left", "main-stick");
     check(config.input_labels.front().input.device == "main-stick", "device rename preserves labels on exact controls");
     profile_setup::rename_device(config, "left-vjoy", "main-vjoy");
-    check(config.modifiers.at("leftmod").device == "main-stick" &&
+    check(config.modifiers.at("leftmod").front().device == "main-stick" &&
           config.bindings.front().input.device == "main-stick" &&
           std::get<AxisAction>(config.bindings.front().actions.front()).device == "main-vjoy",
           "device renames update modifiers and actions");
@@ -71,11 +73,52 @@ void run() {
     validate_edited_config(config);
     check(load_config(serialize_config(config)) == config, "renamed large profile round trips");
     rejected([&] { profile_setup::rename_device(config, "main-stick", "right"); }, "already in use");
-    rejected([&] { profile_setup::remove_device(config, "main-stick"); }, "used by modifier");
-    rejected([&] { profile_setup::remove_device(config, "main-vjoy"); }, "binding action");
     rejected([&] { profile_setup::remove_mode(config, "Combat Mode"); }, "initial mode");
     rejected([&] { profile_setup::remove_modifier(config, "shift"); }, "bindings[");
     check(config != original, "renames changed profile");
+
+    auto physicalRemoval = config;
+    physicalRemoval.modifiers.at("shift").push_back({"right", ControlKind::Button, -30});
+    const auto originalBindings = physicalRemoval.bindings.size();
+    profile_setup::remove_device(physicalRemoval, "main-stick");
+    check(!physicalRemoval.devices.contains("main-stick") &&
+          physicalRemoval.bindings.size() < originalBindings &&
+          std::all_of(physicalRemoval.bindings.begin(), physicalRemoval.bindings.end(), [](const Binding& binding) {
+              return binding.input.device == "right";
+          }) && physicalRemoval.modifiers.at("shift") == std::vector<Control>{{"right", ControlKind::Button, -30}} &&
+          physicalRemoval.input_labels.empty(), "physical removal drops its mappings and assignments, retaining other inputs");
+    validate_edited_config(physicalRemoval);
+    profile_setup::remove_device(physicalRemoval, "right");
+    check(physicalRemoval.modifiers.contains("shift") && physicalRemoval.modifiers.at("shift").empty(),
+          "modifier becomes orphaned after its last controller is removed");
+    validate_edited_config(physicalRemoval);
+    check(load_config(serialize_config(physicalRemoval)) == physicalRemoval, "orphaned modifier round trips");
+
+    auto virtualRemoval = config;
+    virtualRemoval.bindings.front().actions.push_back(AxisAction{"right-vjoy", 2});
+    virtualRemoval.bindings[17].tap_hold->tap.push_back(ButtonAction{"right-vjoy", 300});
+    const auto beforeVirtual = virtualRemoval.bindings.size();
+    profile_setup::remove_device(virtualRemoval, "main-vjoy");
+    check(virtualRemoval.bindings.size() < beforeVirtual &&
+          virtualRemoval.bindings.front().actions == std::vector<Action>{AxisAction{"right-vjoy", 2}} &&
+          std::any_of(virtualRemoval.bindings.begin(), virtualRemoval.bindings.end(), [](const Binding& binding) {
+              return binding.tap_hold && binding.tap_hold->tap == std::vector<Action>{ButtonAction{"right-vjoy", 300}};
+          }),
+          "virtual removal preserves other output actions in ordinary and tap/hold mappings");
+    for (const auto& binding : virtualRemoval.bindings) {
+        auto noRemovedOutputs = [](const std::vector<Action>& actions) {
+            return std::none_of(actions.begin(), actions.end(), [](const Action& action) {
+                return std::visit([](const auto& value) {
+                    if constexpr (std::is_same_v<std::decay_t<decltype(value)>, ModeAction>) return false;
+                    else return value.device == "main-vjoy";
+                }, action);
+            });
+        };
+        check(noRemovedOutputs(binding.actions) && (!binding.tap_hold ||
+              (noRemovedOutputs(binding.tap_hold->tap) && noRemovedOutputs(binding.tap_hold->hold))),
+              "virtual removal clears all references to the deleted output");
+    }
+    validate_edited_config(virtualRemoval);
 
     auto modes = load_config_file(std::string(EXAMPLES_DIR) + "/modes.yaml");
     profile_setup::rename_mode(modes, "alternate", "landing");

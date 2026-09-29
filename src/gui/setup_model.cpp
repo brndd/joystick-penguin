@@ -48,9 +48,10 @@ void rename_device(Config& config, const std::string& from, const std::string& t
     if (from == to) return;
     for (auto& label : config.input_labels)
         if (label.input.device == from) label.input.device = to;
-    for (auto& [name, input] : config.modifiers) {
+    for (auto& [name, inputs] : config.modifiers) {
         (void)name;
-        if (input.device == from) input.device = to;
+        for (auto& input : inputs)
+            if (input.device == from) input.device = to;
     }
     for (auto& binding : config.bindings)
         if (binding.input.device == from) binding.input.device = to;
@@ -65,20 +66,35 @@ void rename_device(Config& config, const std::string& from, const std::string& t
 
 void remove_device(Config& config, const std::string& name) {
     if (!config.devices.contains(name)) throw ConfigError("unknown device '" + name + "'");
-    for (const auto& [modifier, input] : config.modifiers)
-        if (input.device == name)
-            throw ConfigError("device '" + name + "' is used by modifier '" + modifier + "'");
-    for (std::size_t i = 0; i < config.bindings.size(); ++i)
-        if (config.bindings[i].input.device == name)
-            throw ConfigError("device '" + name + "' is used by bindings[" + std::to_string(i) + "].input");
-    for_actions(config, [&](const Action& action) {
-        std::visit([&](const auto& value) {
-            using T = std::decay_t<decltype(value)>;
-            if constexpr (!std::is_same_v<T, ModeAction>)
-                if (value.device == name)
-                    throw ConfigError("device '" + name + "' is used by a binding action");
-        }, action);
-    });
+    const auto kind = config.devices.at(name).kind;
+    if (kind == DeviceKind::Evdev) {
+        std::erase_if(config.bindings, [&](const Binding& binding) { return binding.input.device == name; });
+        for (auto& [modifier, inputs] : config.modifiers) {
+            (void)modifier;
+            std::erase_if(inputs, [&](const Control& input) { return input.device == name; });
+        }
+    } else {
+        auto remove_actions = [&](std::vector<Action>& actions) {
+            std::erase_if(actions, [&](const Action& action) {
+                return std::visit([&](const auto& value) {
+                    using T = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<T, ModeAction>) return false;
+                    else return value.device == name;
+                }, action);
+            });
+        };
+        for (auto& binding : config.bindings) {
+            remove_actions(binding.actions);
+            if (binding.tap_hold) {
+                remove_actions(binding.tap_hold->tap);
+                remove_actions(binding.tap_hold->hold);
+            }
+        }
+        std::erase_if(config.bindings, [](const Binding& binding) {
+            return binding.actions.empty() && (!binding.tap_hold ||
+                (binding.tap_hold->tap.empty() && binding.tap_hold->hold.empty()));
+        });
+    }
     config.devices.erase(name);
     std::erase_if(config.input_labels, [&](const auto& label) { return label.input.device == name; });
 }

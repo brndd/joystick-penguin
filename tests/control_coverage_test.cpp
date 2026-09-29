@@ -44,7 +44,7 @@ devices:
   vh: {kind: uinput, preset: joystick}
 modes: {initial: default, names: [default]}
 modifiers:
-  shift: {input: {device: b, button_code: 307}}
+  shift: {inputs: [{device: b, button_code: 307}]}
 bindings:
   - input: {device: a, axis: 0}
     modes: [default]

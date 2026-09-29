@@ -12,7 +12,7 @@ devices:
 modes: {initial: default, names: [default]}
 modifiers:
   shift:
-    input: {device: physical, button: 5}
+    inputs: [{device: physical, button: 5}]
 bindings:
   - input: {device: physical, button: 1} # A: ordinary
     modes: [default]

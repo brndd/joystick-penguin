@@ -57,8 +57,9 @@ InputRequirements input_requirements(const Config& config, const std::string& na
             if (binding.input.kind == ControlKind::Button) result.keys.insert(binding.input.code);
             else result.axes.insert(binding.input.code);
         }
-    for (const auto& [modifier, control] : config.modifiers)
-        if (control.device == name) result.keys.insert(control.code);
+    for (const auto& [modifier, controls] : config.modifiers)
+        for (const auto& control : controls)
+            if (control.device == name) result.keys.insert(control.code);
     return result;
 }
 

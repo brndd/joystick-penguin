@@ -281,7 +281,7 @@ void newProfileFromGui() {
     modifierName->setText("shifted");
     finishEdit(modifierName);
     check(fresh.config().modifiers.contains("shifted") && !fresh.config().modifiers.contains("shift") &&
-          fresh.config().modifiers.at("shifted").code == -4,
+          fresh.config().modifiers.at("shifted").front().code == -4,
           "modifier rename commits its edited control");
     auto* conditionsList = named<QListWidget>(*tabs->widget(2), "workspaceModesModifiers");
     for (int i = 0; i < conditionsList->count(); ++i)
@@ -292,6 +292,26 @@ void newProfileFromGui() {
     modifierName->setText("shift");
     finishEdit(modifierName);
     check(fresh.config().modifiers.contains("shift"), "renamed modifier can be selected and renamed again");
+    for (int i = 0; i < conditionsList->count(); ++i)
+        if (conditionsList->item(i)->data(Qt::UserRole).toString() == "shift") conditionsList->setCurrentRow(i);
+    QApplication::processEvents();
+    button(*tabs->widget(2), "Add button")->click();
+    QApplication::processEvents();
+    check(fresh.config().modifiers.at("shift").size() == 2, "modifier accepts an additional button");
+    auto inputs = tabs->widget(2)->findChildren<QSpinBox*>("modifierButton");
+    check(inputs.size() == 2, "each modifier button has its own editor");
+    inputs.at(1)->setValue(2);
+    check(fresh.config().modifiers.at("shift")[1].code == -2, "second modifier button is editable");
+    auto removes = tabs->widget(2)->findChildren<QPushButton*>();
+    for (auto* candidate : removes)
+        if (candidate->text() == "Remove button" && candidate->isVisible()) {
+            // Remove the second row without changing the first assignment.
+            if (candidate->parentWidget()->findChild<QSpinBox*>() == inputs.at(1)) candidate->click();
+        }
+    QApplication::processEvents();
+    check(fresh.config().modifiers.at("shift").size() == 1 &&
+          fresh.config().modifiers.at("shift").front().code == -4,
+          "removing one modifier button keeps its other assignment");
 
     check(fresh.config().devices.at("physical").path == "/dev/input/by-path/test-stick-event-joystick-2" &&
           fresh.config().devices.at("virtual").bus == VirtualBus::Usb &&
@@ -299,7 +319,7 @@ void newProfileFromGui() {
           fresh.config().devices.at("virtual").vendor_id == 0x1234 &&
           fresh.config().devices.at("virtual").product_id == 0x5678 &&
           fresh.config().devices.at("virtual").axes.at(2) == AxisRange{0, 255, 0} &&
-          fresh.config().modes.size() == 2 && fresh.config().modifiers.at("shift").code == -4,
+          fresh.config().modes.size() == 2 && fresh.config().modifiers.at("shift").front().code == -4,
           "New profile device, mode, modifier and axis settings applied");
 
     tabs->setCurrentIndex(1);
@@ -563,10 +583,88 @@ void overhaul() {
     check(window.width() == 1024, "workspace supports 1024 logical pixel width");
 }
 
+void deviceRemovalFromGui() {
+    TemporaryDirectory temporary;
+    auto config = load_config_file((std::filesystem::path(EXAMPLES_DIR) / "basic.yaml").string());
+    config.devices.emplace("second", config.devices.at("virtual"));
+    config.bindings.front().actions.push_back(ButtonAction{"second", 290});
+    const auto profile = temporary.path / "remove.yaml";
+    save_config_file(config, profile.string());
+    EditorWindow window;
+    window.show();
+    check(window.openProfile(QString::fromStdString(profile.string())), "open device-removal profile");
+    auto* tabs = window.findChild<QTabWidget*>();
+    tabs->setCurrentIndex(1);
+    QApplication::processEvents();
+    QTimer::singleShot(0, [] {
+        auto* warning = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        check(warning && warning->text().contains("2 mapping(s)") &&
+              warning->text().contains("modifier") && warning->text().contains("unassigned"),
+              "physical removal warns about mappings and orphaned modifiers");
+        warning->button(QMessageBox::Cancel)->click();
+    });
+    toolButton(*tabs->widget(1), "Remove physical")->click();
+    check(window.config() == config, "canceling device removal preserves the profile");
+    QTimer::singleShot(0, [] {
+        auto* warning = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        check(warning && warning->text().contains("2 mapping(s)"), "physical removal consequence is visible");
+        warning->button(QMessageBox::Yes)->click();
+    });
+    toolButton(*tabs->widget(1), "Remove physical")->click();
+    QApplication::processEvents();
+    check(window.config().bindings.empty() && window.config().modifiers.at("shift").empty() &&
+          !window.config().devices.contains("physical"), "physical removal keeps modifier orphaned");
+    validate_edited_config(window.config());
+    action_named(window, "&Undo")->trigger();
+    QApplication::processEvents();
+    check(window.config() == config, "device removal is one undoable transaction");
+
+    QTimer::singleShot(0, [] {
+        auto* warning = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        check(warning && warning->text().contains("output action(s)") &&
+              warning->text().contains("1 mapping(s)"), "virtual removal warns about changed and deleted mappings");
+        warning->button(QMessageBox::Yes)->click();
+    });
+    toolButton(*tabs->widget(1), "Remove virtual")->click();
+    QApplication::processEvents();
+    check(window.config().bindings.size() == 1 &&
+          window.config().bindings.front().actions == std::vector<Action>{ButtonAction{"second", 290}} &&
+          !window.config().devices.contains("virtual"), "virtual removal keeps unaffected mapping actions");
+    validate_edited_config(window.config());
+    QTimer::singleShot(0, [] {
+        auto* warning = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        check(warning != nullptr, "physical cleanup confirmation reopened");
+        warning->button(QMessageBox::Yes)->click();
+    });
+    toolButton(*tabs->widget(1), "Remove physical")->click();
+    QApplication::processEvents();
+    QTimer::singleShot(0, [] {
+        auto* prompt = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+        check(prompt != nullptr, "replacement controller name prompt opened");
+        prompt->setTextValue("replacement");
+        prompt->accept();
+    });
+    toolButton(*tabs->widget(1), "Add controller")->click();
+    tabs->setCurrentIndex(2);
+    QApplication::processEvents();
+    auto* modifiers = named<QListWidget>(*tabs->widget(2), "workspaceModesModifiers");
+    for (int i = 0; i < modifiers->count(); ++i)
+        if (modifiers->item(i)->data(Qt::UserRole).toString() == "shift") modifiers->setCurrentRow(i);
+    QApplication::processEvents();
+    check(window.config().modifiers.at("shift").empty(), "orphan remains available for reassignment");
+    button(*tabs->widget(2), "Add button")->click();
+    QApplication::processEvents();
+    check(window.config().modifiers.at("shift").size() == 1 &&
+          window.config().modifiers.at("shift").front().device == "replacement",
+          "orphaned modifier can be repointed to a replacement controller");
+    validate_edited_config(window.config());
+}
+
 void run() {
     { EditorWindow defaultWindow; check(defaultWindow.size() == QSize(1600, 900), "initial window is 1600x900"); }
     overhaul();
     newProfileFromGui();
+    deviceRemovalFromGui();
     {
         EditorWindow blank;
         check(blank.config().devices.empty() && blank.config().bindings.empty(), "blank profile has no default devices");

@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
         if (reader < 0) { std::cout << "evdev unreadable; monitor hardware test skipped\n"; return 77; }
         Config config;
         config.devices.emplace("stick", Device{DeviceKind::Evdev, node, true, ""});
-        config.modifiers.emplace("shift", Control{"stick", ControlKind::Button, -1});
+        config.modifiers.emplace("shift", std::vector<Control>{{"stick", ControlKind::Button, -1}});
         config.input_labels.push_back({{"stick", ControlKind::Button, -1}, "Trigger"});
         ControlBrowser browser(config);
         browser.show(); wait();

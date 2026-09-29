@@ -138,8 +138,11 @@ void SetupWorkspace::refresh() {
         heading("MODES", "Add persistent mode", 0);
         for (const auto& mode : config_.modes) add(qs(mode), qs(mode) + (mode == config_.initial_mode ? " · Default mode" : " · Persistent mode"), 0);
         heading("MODIFIERS", "Add held modifier", 1);
-        for (const auto& [name, input] : config_.modifiers)
-            add(qs(name), qs(name) + " · While " + labeledInput(config_, input) + " is held", 1);
+        for (const auto& [name, inputs] : config_.modifiers) {
+            QStringList labels;
+            for (const auto& input : inputs) labels << qs(input.device) + " " + labeledInput(config_, input);
+            add(qs(name), qs(name) + (labels.isEmpty() ? " · Unassigned" : " · While " + labels.join(" or ") + " is held"), 1);
+        }
     }
     if (!list_->currentItem()) {
         for (int i = 0; i < list_->count(); ++i)
@@ -335,7 +338,7 @@ void SetupWorkspace::add(int kind) {
         if (next.modifiers.contains(name)) { if (error) error("That modifier already exists."); return; }
         auto physical = std::find_if(next.devices.begin(), next.devices.end(), [](const auto& entry) { return entry.second.kind == DeviceKind::Evdev; });
         if (physical == next.devices.end()) { if (error) error("Add a controller in Devices first."); return; }
-        next.modifiers.emplace(name, Control{physical->first, ControlKind::Button, -1});
+        next.modifiers.emplace(name, std::vector<Control>{{physical->first, ControlKind::Button, -1}});
     }
     if (!commit(std::move(next), false)) return;
     refresh();
@@ -347,8 +350,6 @@ void SetupWorkspace::add(int kind) {
 }
 
 void SetupWorkspace::remove(const QString& name, int kind) {
-    if (QMessageBox::question(this, "Remove " + name, "Remove '" + name + "' from this profile?",
-                              QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
     const auto key = name.toStdString();
     Config next = config_;
     try {
@@ -356,5 +357,33 @@ void SetupWorkspace::remove(const QString& name, int kind) {
         else if (kind) profile_setup::remove_modifier(next, key);
         else profile_setup::remove_mode(next, key);
     } catch (const ConfigError& failure) { if (error) error(qs(failure.what())); return; }
+    QString message = "Remove '" + name + "' from this profile?";
+    if (devices_) {
+        const int removed = static_cast<int>(config_.bindings.size() - next.bindings.size());
+        if (kind == 0) {
+            int unassigned = 0, orphaned = 0;
+            for (const auto& [modifier, inputs] : config_.modifiers) {
+                const auto& remaining = next.modifiers.at(modifier);
+                unassigned += static_cast<int>(inputs.size() - remaining.size());
+                if (!inputs.empty() && remaining.empty()) ++orphaned;
+            }
+            message += QString("\n\n%1 mapping(s) will be removed. %2 modifier button assignment(s) will be removed; %3 modifier(s) will become unassigned. Input labels for this controller will be removed.")
+                .arg(removed).arg(unassigned).arg(orphaned);
+        } else {
+            auto actionCount = [](const Config& config) {
+                std::size_t count = 0;
+                for (const auto& binding : config.bindings) {
+                    count += binding.actions.size();
+                    if (binding.tap_hold) count += binding.tap_hold->tap.size() + binding.tap_hold->hold.size();
+                }
+                return count;
+            };
+            const auto actions = actionCount(config_) - actionCount(next);
+            message += QString("\n\n%1 output action(s) targeting this joystick will be removed from mappings, including tap/hold branches. %2 mapping(s) with no actions left will be removed.")
+                .arg(actions).arg(removed);
+        }
+    }
+    if (QMessageBox::question(this, "Remove " + name, message,
+                              QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
     commit(std::move(next), true);
 }

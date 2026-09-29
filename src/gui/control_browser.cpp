@@ -294,7 +294,10 @@ void ControlBrowser::rebuild() {
             std::find(s.controls.begin(), s.controls.end(), input) == s.controls.end()) s.controls.push_back(input);
     };
     for (const auto& binding : s.config.bindings) include(binding.input);
-    for (const auto& [name, input] : s.config.modifiers) { (void)name; include(input); }
+    for (const auto& [name, inputs] : s.config.modifiers) {
+        (void)name;
+        for (const auto& input : inputs) include(input);
+    }
     for (const auto& label : s.config.input_labels) include(label.input);
     s.tree->clear();
     QTreeWidgetItem* groups[3];
@@ -309,9 +312,10 @@ void ControlBrowser::rebuild() {
         if (!identity.contains(s.search->text(), Qt::CaseInsensitive)) continue;
         int count = std::count_if(s.config.bindings.begin(), s.config.bindings.end(), [&](const auto& b) { return b.input == input; });
         QString usage = count ? QString::number(count) : "Unmapped";
-        for (const auto& [modifier, control] : s.config.modifiers) {
+        for (const auto& [modifier, controls] : s.config.modifiers) {
             (void)modifier;
-            if (control == input) usage = count ? usage + " · M" : "Modifier";
+            if (std::find(controls.begin(), controls.end(), input) != controls.end())
+                usage = count ? usage + " · M" : "Modifier";
         }
         auto* item = new QTreeWidgetItem(groups[static_cast<int>(input.kind)], {label.isEmpty() ? inputName(input) : label, usage, "○"});
         item->setData(0, Qt::UserRole, i);

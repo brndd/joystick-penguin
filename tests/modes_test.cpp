@@ -46,7 +46,7 @@ devices:
       1: {min: -100, max: 100, neutral: 0}
 modes: {initial: default, names: [default, alternate]}
 modifiers:
-  shift: {input: {device: b, button_code: 307}}
+  shift: {inputs: [{device: b, button_code: 307}]}
 bindings:
   - input: {device: a, button_code: 304}
     modes: [default]

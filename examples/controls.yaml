@@ -24,7 +24,7 @@ devices:
 modes: {initial: default, names: [default]}
 modifiers:
   shift:
-    input: {device: right, button: 5}
+    inputs: [{device: right, button: 5}]
 bindings:
   - input: {device: left, axis: 0}
     modes: [default]

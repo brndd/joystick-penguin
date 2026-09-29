@@ -28,7 +28,7 @@ devices:
     product_id: 0x0818
 modes: {initial: SCM Mode, names: [SCM Mode, Auxiliary Mode, Nav Mode]}
 modifiers:
-  leftmod: {input: {device: left, button: 5}}
+  leftmod: {inputs: [{device: left, button: 5}]}
 bindings:
   # Physical ABS_RX/RY mini-stick -> virtual ABS_Z/RX; twist -> ABS_RY.
   # Linux ABS_X/Y/Z/RX/RY/RZ codes are 0/1/2/3/4/5.

@@ -26,6 +26,9 @@ private:
     std::string key_;
     SetupCommit commit_;
     QLineEdit* name_;
-    QComboBox *controller_, *format_;
-    QSpinBox* code_;
+    struct ButtonRow {
+        QComboBox *controller, *format;
+        QSpinBox* code;
+    };
+    std::vector<ButtonRow> rows_;
 };

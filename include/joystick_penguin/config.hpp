@@ -98,7 +98,7 @@ struct Config {
     std::map<std::string, Device> devices;
     std::string initial_mode;
     std::vector<std::string> modes;
-    std::map<std::string, Control> modifiers;
+    std::map<std::string, std::vector<Control>> modifiers; // Any assigned button activates the named modifier.
     std::vector<Binding> bindings;
     std::vector<InputLabel> input_labels;
     bool operator==(const Config&) const = default;

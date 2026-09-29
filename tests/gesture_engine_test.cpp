@@ -52,8 +52,8 @@ Config profile() {
     config.devices.emplace("b", Device{DeviceKind::Evdev, "/dev/input/by-id/b"});
     config.devices.emplace("v1", Device{DeviceKind::Uinput, "", true, "joystick"});
     config.devices.emplace("v2", Device{DeviceKind::Uinput, "", true, "joystick"});
-    config.modifiers.emplace("shift", Control{"a", ControlKind::Button, 307});
-    config.modifiers.emplace("layer", Control{"b", ControlKind::Button, 311});
+    config.modifiers.emplace("shift", std::vector<Control>{{"a", ControlKind::Button, 307}});
+    config.modifiers.emplace("layer", std::vector<Control>{{"b", ControlKind::Button, 311}});
     config.bindings = {
         bind("a", 304, {}, {{"v1", 305}}),
         bind("a", 304, {"shift"}, {{"v1", 306}}),
@@ -85,6 +85,32 @@ void test_required_sequence() {
     expect(engine.process(down("a", 304)), {{"v1", 306, 1}}, "new A is modified");
     expect(engine.process(up("a", 307)), {{"v1", 312, 0}}, "modifier releases first");
     expect(engine.process(up("a", 304)), {{"v1", 306, 0}}, "modified A remains captured");
+}
+
+void test_shared_modifier_buttons() {
+    auto config = profile();
+    config.modifiers.at("shift").push_back({"b", ControlKind::Button, 307});
+    GestureEngine engine(config);
+    expect(engine.process(down("a", 307)), {{"v1", 312, 1}}, "first button activates shift");
+    expect(engine.process(down("b", 307)), {}, "second button keeps shift active");
+    expect(engine.process(up("a", 307)), {{"v1", 312, 0}}, "first release does not clear shift");
+    expect(engine.process(down("b", 308)), {{"v2", 320, 1}}, "second button still activates mappings");
+    expect(engine.process(up("b", 308)), {{"v2", 320, 0}}, "modified mapping releases");
+    expect(engine.process({"b", InputEventKind::Disconnected}), {}, "last button disconnect clears shift");
+    expect(engine.process(down("a", 304)), {{"v1", 305, 1}}, "shift cleared after last button disconnect");
+    expect(engine.process(up("a", 304)), {{"v1", 305, 0}}, "ordinary mapping releases");
+
+    expect(engine.process(down("a", 307)), {{"v1", 312, 1}}, "first button held again");
+    expect(engine.process(down("b", 307)), {}, "second button held again");
+    expect(engine.process({"a", InputEventKind::SyncLost}), {{"v1", 312, 0}}, "first device lost");
+    expect(engine.process(down("b", 308)), {{"v2", 320, 1}}, "other device keeps modifier active");
+    expect(engine.process(up("b", 308)), {{"v2", 320, 0}}, "remaining modified mapping releases");
+    expect(engine.process(up("b", 307)), {}, "last button clears modifier");
+    expect(engine.release_all(), {}, "all shared modifier state cleaned up");
+
+    config.modifiers.at("shift").clear();
+    GestureEngine orphan(config);
+    expect(orphan.process(down("a", 304)), {{"v1", 305, 1}}, "orphaned modifier stays inactive");
 }
 
 void test_pre_press_snapshot_and_specificity() {
@@ -159,6 +185,7 @@ void test_multiple_modes_are_supported() {
 int main() {
     try {
         test_required_sequence();
+        test_shared_modifier_buttons();
         test_pre_press_snapshot_and_specificity();
         test_unmapped_and_repeats();
         test_ownership_and_loss();
