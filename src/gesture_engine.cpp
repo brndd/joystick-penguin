@@ -276,12 +276,30 @@ void GestureEngine::route_axis(const Key& source, AxisState& state,
         const long double physical = std::clamp(static_cast<long double>(state.value),
                                                  static_cast<long double>(state.minimum),
                                                  static_cast<long double>(state.maximum));
-        long double fraction = (physical - state.minimum) /
-                               (static_cast<long double>(state.maximum) - state.minimum);
-        if (axis.invert) fraction = 1 - fraction;
-        const auto scaled = static_cast<int>(std::llround(
-            static_cast<long double>(range.minimum) +
-            fraction * (static_cast<long double>(range.maximum) - range.minimum)));
+        const auto scale = [](long double value, long double from_min, long double from_max,
+                              long double to_min, long double to_max) {
+            return to_min + (value - from_min) / (from_max - from_min) * (to_max - to_min);
+        };
+        // Inclusive integer ranges have an upper midpoint (2048 for 0..4095).
+        // A single endpoint-to-endpoint slope misses that center after inversion
+        // or when the source and target have different resolutions.
+        const long double center = static_cast<long long>(state.minimum) +
+            (static_cast<long long>(state.maximum) - state.minimum + 1) / 2;
+        long double mapped;
+        if (range.neutral > range.minimum && range.neutral < range.maximum &&
+            center < state.maximum) {
+            mapped = physical <= center
+                ? scale(physical, state.minimum, center,
+                        axis.invert ? range.maximum : range.minimum, range.neutral)
+                : scale(physical, center, state.maximum,
+                        range.neutral, axis.invert ? range.minimum : range.maximum);
+        } else {
+            // Endpoint-neutral axes (e.g. throttles) have no center to preserve.
+            mapped = scale(physical, state.minimum, state.maximum,
+                           axis.invert ? range.maximum : range.minimum,
+                           axis.invert ? range.minimum : range.maximum);
+        }
+        const auto scaled = static_cast<int>(std::llround(mapped));
         update_abs(target, state.outputs[i].owner, scaled, changes);
     }
 }

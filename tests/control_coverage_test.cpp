@@ -196,6 +196,42 @@ void axis_arbitration_and_neutral() {
            "nonzero neutral is respected");
 }
 
+void axis_centers_across_inversion_and_resolutions() {
+    auto config = load_config(profile);
+    config.devices.at("v").axes.at(0) = {0, 4095, 2048};
+    config.devices.at("v").axes.at(2) = {0, 4095, 2048};
+    config.bindings[0].actions = {AxisAction{"v", 0, true}};
+    GestureEngine engine(config);
+
+    expect(engine.process(movement("a", 0, 2077, 0, 4095)), {{"v", abs, 0, 2019}},
+           "inverted 12-bit axis approaches center");
+    expect(engine.process(movement("a", 0, 2048, 0, 4095)), {{"v", abs, 0, 2048}},
+           "inverted physical center equals virtual neutral");
+    expect(engine.process(movement("a", 0, 0, 0, 4095)), {{"v", abs, 0, 4095}},
+           "inverted low endpoint reaches virtual maximum");
+    expect(engine.process(movement("a", 0, 4095, 0, 4095)), {{"v", abs, 0, 0}},
+           "inverted high endpoint reaches virtual minimum");
+
+    expect(engine.process(movement("a", 2, 1004, 0, 2047)), {{"v", abs, 2, 2008}},
+           "11-bit axis approaches 12-bit center");
+    expect(engine.process(movement("a", 2, 1024, 0, 2047)), {{"v", abs, 2, 2048}},
+           "11-bit physical center equals 12-bit virtual neutral");
+    expect(engine.process(movement("a", 2, 2047, 0, 2047)), {{"v", abs, 2, 4095}},
+           "11-bit high endpoint reaches 12-bit maximum");
+    expect(engine.process(movement("a", 2, 0, 0, 2047)), {{"v", abs, 2, 0}},
+           "11-bit low endpoint reaches 12-bit minimum");
+
+    config.devices.at("v").axes.at(2) = {-2048, 2047, 0};
+    config.bindings[2].actions = {AxisAction{"v", 2, true}};
+    GestureEngine signed_engine(config);
+    expect(signed_engine.process(movement("a", 2, 0, 0, 2047)), {{"v", abs, 2, 2047}},
+           "inverted signed output reaches positive endpoint");
+    expect(signed_engine.process(movement("a", 2, 1024, 0, 2047)), {{"v", abs, 2, 0}},
+           "inverted signed output centers at zero");
+    expect(signed_engine.process(movement("a", 2, 2047, 0, 2047)), {{"v", abs, 2, -2048}},
+           "inverted signed output reaches negative endpoint");
+}
+
 } // namespace
 
 int main() {
@@ -204,6 +240,7 @@ int main() {
         cached_position_and_modifier_loss();
         hats_and_diagonals();
         axis_arbitration_and_neutral();
+        axis_centers_across_inversion_and_resolutions();
         std::cout << "control coverage tests passed\n";
         return 0;
     } catch (const std::exception& error) {
