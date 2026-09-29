@@ -8,6 +8,7 @@
 
 QString inputName(const joystick_penguin::Control& input);
 QString labeledInput(const joystick_penguin::Config& config, const joystick_penguin::Control& input);
+QString labeledOutputButton(const joystick_penguin::Config& config, const std::string& device, int number);
 
 // Owns only read-only observation. It never touches the runtime or grabs a device.
 class ControlBrowser : public QWidget {

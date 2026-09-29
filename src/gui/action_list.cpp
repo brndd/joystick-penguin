@@ -180,7 +180,7 @@ void ActionList::openEditor(int row) {
         });
         list = actions(where);
         if (auto* item = table_->item(tableRow(where), 0)) {
-            const QString text = actionName((*list)[where.index]);
+            const QString text = actionName(document_.config(), (*list)[where.index]);
             item->setData(Qt::AccessibleTextRole, text);
             item->setToolTip(text);
             if (auto* widget = table_->cellWidget(item->row(), 0))
@@ -256,11 +256,11 @@ void ActionList::refresh() {
     const QSignalBlocker blocker(table_);
     filling_ = true;
     table_->setRowCount(0);
-    auto append = [this, timed = binding.tap_hold.has_value()](const std::vector<Action>& list, Branch branch) {
+    auto append = [this, &config, timed = binding.tap_hold.has_value()](const std::vector<Action>& list, Branch branch) {
         for (int index = 0; index < static_cast<int>(list.size()); ++index) {
             const int rowNumber = table_->rowCount();
             table_->insertRow(rowNumber);
-            const QString text = actionName(list[index]);
+            const QString text = actionName(config, list[index]);
             auto* item = new QTableWidgetItem;
             item->setData(Qt::AccessibleTextRole, text);
             item->setData(Qt::UserRole, static_cast<int>(branch));

@@ -48,6 +48,8 @@ void rename_device(Config& config, const std::string& from, const std::string& t
     if (from == to) return;
     for (auto& label : config.input_labels)
         if (label.input.device == from) label.input.device = to;
+    for (auto& label : config.output_labels)
+        if (label.device == from) label.device = to;
     for (auto& [name, inputs] : config.modifiers) {
         (void)name;
         for (auto& input : inputs)
@@ -97,6 +99,7 @@ void remove_device(Config& config, const std::string& name) {
     }
     config.devices.erase(name);
     std::erase_if(config.input_labels, [&](const auto& label) { return label.input.device == name; });
+    std::erase_if(config.output_labels, [&](const auto& label) { return label.device == name; });
 }
 
 void rename_mode(Config& config, const std::string& from, const std::string& to) {
@@ -155,6 +158,27 @@ void remove_axis(Config& config, const std::string& device, int code) {
             throw ConfigError("output axis " + device + ":" + std::to_string(code) + " is used by a binding");
     });
     found->second.axes.erase(code);
+}
+
+void mirror_button_labels(Config& config, const std::string& source, const std::string& target) {
+    if (!config.devices.contains(source) || config.devices.at(source).kind != DeviceKind::Evdev)
+        throw ConfigError("unknown input controller '" + source + "'");
+    if (!config.devices.contains(target) || config.devices.at(target).kind != DeviceKind::Uinput)
+        throw ConfigError("unknown output device '" + target + "'");
+    std::erase_if(config.output_labels, [&](const OutputLabel& label) {
+        return label.device == target && label.button >= 1 && label.button <= joystick_button_count;
+    });
+    for (const auto& label : config.input_labels)
+        if (label.input.device == source && label.input.kind == ControlKind::Button &&
+            label.input.code < 0 && label.input.code >= -joystick_button_count)
+            config.output_labels.push_back({target, -label.input.code, label.label});
+}
+
+void refresh_virtual_device(Config& config, const std::string& source, const std::string& target,
+                            const std::map<int, AxisRange>& axes) {
+    mirror_button_labels(config, source, target);
+    auto& output = config.devices.at(target);
+    for (const auto& [code, range] : axes) output.axes.insert_or_assign(code, range);
 }
 
 } // namespace profile_setup

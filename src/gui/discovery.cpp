@@ -14,6 +14,39 @@
 
 namespace profile_setup {
 
+DiscoveredDevice inspect_device(const std::string& path) {
+    DiscoveredDevice device;
+    device.path = path;
+    int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) { device.issue = std::strerror(errno); return device; }
+    libevdev* evdev = nullptr;
+    const int result = libevdev_new_from_fd(fd, &evdev);
+    if (result < 0) {
+        device.issue = std::strerror(-result);
+        close(fd);
+        return device;
+    }
+    device.name = libevdev_get_name(evdev) ? libevdev_get_name(evdev) : "Unknown controller";
+    // Use exactly the same ordering as EvdevInput::resolve_keys().
+    for (int code = BTN_JOYSTICK; code < KEY_MAX; ++code)
+        if (libevdev_has_event_code(evdev, EV_KEY, code)) device.buttons.push_back(code);
+    for (int code = BTN_MISC; code < BTN_JOYSTICK; ++code)
+        if (libevdev_has_event_code(evdev, EV_KEY, code)) device.buttons.push_back(code);
+    for (int code = 0; code <= ABS_MAX; ++code) {
+        if (!libevdev_has_event_code(evdev, EV_ABS, code)) continue;
+        device.axes.push_back(code);
+        if (code >= ABS_HAT0X && code <= ABS_HAT3Y) continue;
+        if (const auto* info = libevdev_get_abs_info(evdev, code); info && info->minimum < info->maximum) {
+            const int neutral = info->minimum < 0 && info->maximum >= 0 ? 0 :
+                info->minimum + (static_cast<long long>(info->maximum) - info->minimum + 1) / 2;
+            device.axis_ranges.emplace(code, joystick_penguin::AxisRange{info->minimum, info->maximum, neutral});
+        }
+    }
+    libevdev_free(evdev);
+    close(fd);
+    return device;
+}
+
 std::vector<DiscoveredDevice> discover_devices(const std::string& input_root) {
     namespace fs = std::filesystem;
     std::map<std::string, DiscoveredDevice> devices;
@@ -39,34 +72,7 @@ std::vector<DiscoveredDevice> discover_devices(const std::string& input_root) {
                 device.aliases.push_back(path);
                 continue;
             }
-            device.path = path;
-            int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-            if (fd < 0) { device.issue = std::strerror(errno); continue; }
-            libevdev* evdev = nullptr;
-            const int result = libevdev_new_from_fd(fd, &evdev);
-            if (result < 0) {
-                device.issue = std::strerror(-result);
-                close(fd);
-                continue;
-            }
-            device.name = libevdev_get_name(evdev) ? libevdev_get_name(evdev) : "Unknown controller";
-            // Use exactly the same ordering as EvdevInput::resolve_keys().
-            for (int code = BTN_JOYSTICK; code < KEY_MAX; ++code)
-                if (libevdev_has_event_code(evdev, EV_KEY, code)) device.buttons.push_back(code);
-            for (int code = BTN_MISC; code < BTN_JOYSTICK; ++code)
-                if (libevdev_has_event_code(evdev, EV_KEY, code)) device.buttons.push_back(code);
-            for (int code = 0; code <= ABS_MAX; ++code) {
-                if (!libevdev_has_event_code(evdev, EV_ABS, code)) continue;
-                device.axes.push_back(code);
-                if (code >= ABS_HAT0X && code <= ABS_HAT3Y) continue;
-                if (const auto* info = libevdev_get_abs_info(evdev, code); info && info->minimum < info->maximum) {
-                    const int neutral = info->minimum < 0 && info->maximum >= 0 ? 0 :
-                        info->minimum + (static_cast<long long>(info->maximum) - info->minimum + 1) / 2;
-                    device.axis_ranges.emplace(code, joystick_penguin::AxisRange{info->minimum, info->maximum, neutral});
-                }
-            }
-            libevdev_free(evdev);
-            close(fd);
+            device = inspect_device(path);
         }
     }
     std::vector<DiscoveredDevice> result;

@@ -19,5 +19,8 @@ struct DiscoveredDevice {
 
 // Inspect stable links only. Never grab or consume device events.
 std::vector<DiscoveredDevice> discover_devices(const std::string& input_root = "/dev/input");
+// Inspect a configured controller path (including manually entered links).
+// On failure, issue is nonempty and no capabilities are returned.
+DiscoveredDevice inspect_device(const std::string& path);
 
 } // namespace profile_setup

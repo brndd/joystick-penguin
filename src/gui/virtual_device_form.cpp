@@ -1,5 +1,6 @@
 #include "virtual_device_form.hpp"
 #include "setup_model.hpp"
+#include "discovery.hpp"
 #include "joystick_penguin/joystick_preset.hpp"
 
 #include <QComboBox>
@@ -11,6 +12,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QStringList>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QSignalBlocker>
@@ -55,6 +57,28 @@ void VirtualDeviceForm::buildProfileFields(QVBoxLayout* layout, const Device& de
     display_->setPlaceholderText("JP " + qs(key_));
     form->addRow("Joystick display name", display_);
     form->addRow("Capabilities", new QLabel("Joystick preset · 79 buttons · 4 hats · declared axes", fields));
+    auto* refresh = new QPushButton("Refresh from controller…", fields);
+    refresh->setObjectName("refreshVirtualDevice");
+    refresh->setToolTip("Update matching axis ranges and replace preset button labels from a configured controller. Other axes are retained.");
+    QStringList sources;
+    for (const auto& [name, source] : config_.devices)
+        if (source.kind == DeviceKind::Evdev) sources << qs(name);
+    refresh->setEnabled(!sources.empty());
+    form->addRow(refresh);
+    connect(refresh, &QPushButton::clicked, this, [this, sources] {
+        bool ok = false;
+        const QString selected = QInputDialog::getItem(this, "Refresh virtual joystick", "Controller", sources, 0, false, &ok);
+        if (!ok || selected.isEmpty()) return;
+        const auto source = selected.toStdString();
+        const auto detected = profile_setup::inspect_device(config_.devices.at(source).path);
+        if (!detected.issue.empty()) {
+            if (error_) error_("Cannot read controller '" + selected + "': " + qs(detected.issue));
+            return;
+        }
+        auto next = proposed();
+        profile_setup::refresh_virtual_device(next, source, key_, detected.axis_ranges);
+        if (commit_(std::move(next), true, {})) setEnabled(false);
+    });
     layout->addWidget(fields);
 }
 

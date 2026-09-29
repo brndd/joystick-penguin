@@ -94,6 +94,13 @@ struct InputLabel {
     bool operator==(const InputLabel&) const = default;
 };
 
+struct OutputLabel {
+    std::string device;
+    int button; // One-based joystick preset button number.
+    std::string label;
+    bool operator==(const OutputLabel&) const = default;
+};
+
 struct Config {
     std::map<std::string, Device> devices;
     std::string initial_mode;
@@ -101,6 +108,7 @@ struct Config {
     std::map<std::string, std::vector<Control>> modifiers; // Any assigned button activates the named modifier.
     std::vector<Binding> bindings;
     std::vector<InputLabel> input_labels;
+    std::vector<OutputLabel> output_labels;
     bool operator==(const Config&) const = default;
 };
 

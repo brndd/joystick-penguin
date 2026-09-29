@@ -54,9 +54,24 @@ void run() {
     auto config = load_config_file(std::string(EXAMPLES_DIR) + "/star_citizen.yaml");
     const auto original = config;
     config.input_labels.push_back({{"left", ControlKind::Button, -1}, "Trigger"});
+    config.input_labels.push_back({{"left", ControlKind::Button, -79}, "Last"});
+    config.input_labels.push_back({{"left", ControlKind::Button, -80}, "Beyond preset"});
+    config.input_labels.push_back({{"left", ControlKind::Button, 288}, "Literal"});
+    config.output_labels.push_back({"left-vjoy", 2, "Old label"});
+    profile_setup::mirror_button_labels(config, "left", "left-vjoy");
+    check(config.output_labels == std::vector<OutputLabel>{{"left-vjoy", 1, "Trigger"}, {"left-vjoy", 79, "Last"}},
+          "mirroring replaces preset labels by index, ignoring literal and out-of-range inputs");
+    config.output_labels.push_back({"right-vjoy", 1, "Keep other device"});
+    profile_setup::refresh_virtual_device(config, "left", "left-vjoy", {{0, {-100, 100, 0}}, {8, {0, 255, 128}}});
+    check(config.devices.at("left-vjoy").axes.at(0) == AxisRange{-100, 100, 0} &&
+          config.devices.at("left-vjoy").axes.contains(8) && config.devices.at("left-vjoy").axes.contains(7) &&
+          config.output_labels.back() == OutputLabel{"left-vjoy", 79, "Last"},
+          "refresh updates source axes, retains unmatched axes, and preserves labels on other devices");
     profile_setup::rename_device(config, "left", "main-stick");
     check(config.input_labels.front().input.device == "main-stick", "device rename preserves labels on exact controls");
     profile_setup::rename_device(config, "left-vjoy", "main-vjoy");
+    check(config.output_labels.front().device == "right-vjoy" && config.output_labels[1].device == "main-vjoy",
+          "virtual device rename updates its labels");
     check(config.modifiers.at("leftmod").front().device == "main-stick" &&
           config.bindings.front().input.device == "main-stick" &&
           std::get<AxisAction>(config.bindings.front().actions.front()).device == "main-vjoy",
@@ -99,6 +114,9 @@ void run() {
     virtualRemoval.bindings[17].tap_hold->tap.push_back(ButtonAction{"right-vjoy", 300});
     const auto beforeVirtual = virtualRemoval.bindings.size();
     profile_setup::remove_device(virtualRemoval, "main-vjoy");
+    check(std::none_of(virtualRemoval.output_labels.begin(), virtualRemoval.output_labels.end(), [](const OutputLabel& label) {
+        return label.device == "main-vjoy";
+    }), "virtual device removal drops its button labels");
     check(virtualRemoval.bindings.size() < beforeVirtual &&
           virtualRemoval.bindings.front().actions == std::vector<Action>{AxisAction{"right-vjoy", 2}} &&
           std::any_of(virtualRemoval.bindings.begin(), virtualRemoval.bindings.end(), [](const Binding& binding) {

@@ -129,6 +129,17 @@ std::string emit_config(const Config& config) {
         }
         root["input_labels"] = labels;
     }
+    if (!config.output_labels.empty()) {
+        YAML::Node labels(YAML::NodeType::Sequence);
+        for (const auto& label : config.output_labels) {
+            YAML::Node entry(YAML::NodeType::Map);
+            entry["device"] = label.device;
+            entry["button"] = label.button;
+            entry["label"] = label.label;
+            labels.push_back(entry);
+        }
+        root["output_labels"] = labels;
+    }
     YAML::Node bindings(YAML::NodeType::Sequence);
     for (const auto& binding : config.bindings) {
         YAML::Node entry(YAML::NodeType::Map);

@@ -277,7 +277,7 @@ void BindingDetail::updateSummary() {
     const auto& config = document_.config();
     if (selected_ < 0 || selected_ >= static_cast<int>(config.bindings.size())) return;
     const auto& binding = config.bindings[selected_];
-    summary_->setText(labeledInput(config, binding.input) + " · " + qs(binding.input.device) + "\n" + actionSummary(binding));
+    summary_->setText(labeledInput(config, binding.input) + " · " + qs(binding.input.device) + "\n" + actionSummary(config, binding));
 }
 
 void BindingDetail::setIssue(const QString& message) { issue_->setText(message); }

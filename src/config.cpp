@@ -434,6 +434,18 @@ void validate_config(const Config& config) {
                 throw ConfigError("duplicate input identity in input_labels[" + std::to_string(i) + "]");
     }
 
+    for (std::size_t i = 0; i < config.output_labels.size(); ++i) {
+        const auto& label = config.output_labels[i];
+        const auto where = "output_labels[" + std::to_string(i) + "]";
+        check_device(config, label.device, DeviceKind::Uinput, where);
+        if (label.button < 1 || label.button > joystick_button_count)
+            throw ConfigError(where + ".button must be between 1 and 79");
+        if (label.label.empty()) throw ConfigError(where + ".label must be a nonempty string");
+        for (std::size_t j = 0; j < i; ++j)
+            if (config.output_labels[j].device == label.device && config.output_labels[j].button == label.button)
+                throw ConfigError("duplicate button identity in " + where);
+    }
+
     for (std::size_t index = 0; index < config.bindings.size(); ++index) {
         validate_binding(config, index);
         validate_binding_precedence(config, index);
@@ -441,7 +453,7 @@ void validate_config(const Config& config) {
 }
 
 Config parse(const YAML::Node& root) {
-    keys(root, "profile", {"version", "devices", "modes", "modifiers", "bindings", "input_labels"});
+    keys(root, "profile", {"version", "devices", "modes", "modifiers", "bindings", "input_labels", "output_labels"});
     if (number(required(root, "version", "profile"), "version", 0,
                std::numeric_limits<int>::max()) != 1)
         throw ConfigError("unsupported profile version (expected 1)");
@@ -458,6 +470,16 @@ Config parse(const YAML::Node& root) {
             keys(labels[i], where, {"input", "label"});
             config.input_labels.push_back({input_control(required(labels[i], "input", where), where + ".input"),
                                            field(labels[i], "label", where)});
+        }
+    }
+    if (const auto labels = root["output_labels"]) {
+        expect_sequence(labels, "output_labels");
+        for (std::size_t i = 0; i < labels.size(); ++i) {
+            const auto where = "output_labels[" + std::to_string(i) + "]";
+            keys(labels[i], where, {"device", "button", "label"});
+            config.output_labels.push_back({field(labels[i], "device", where),
+                number(required(labels[i], "button", where), where + ".button", 1, joystick_button_count),
+                field(labels[i], "label", where)});
         }
     }
     validate_config(config);

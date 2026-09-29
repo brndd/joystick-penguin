@@ -97,6 +97,20 @@ void run() {
         rejected([&] { serialize_config(invalid); }, "label must be a nonempty string");
         invalid = labeled; invalid.input_labels.back().input.direction = 0;
         rejected([&] { serialize_config(invalid); }, "direction");
+        const auto virtualDevice = labeled.bindings.front().actions.front();
+        const auto outputName = std::get<ButtonAction>(virtualDevice).device;
+        labeled.output_labels = {{outputName, 1, "Fire"}, {outputName, 79, "Auxiliary"}};
+        check(load_config(serialize_config(labeled)) == labeled, "virtual button labels round trip independently of mappings");
+        invalid = labeled; invalid.output_labels.push_back(labeled.output_labels.front());
+        rejected([&] { serialize_config(invalid); }, "duplicate button identity");
+        invalid = labeled; invalid.output_labels.front().device = device;
+        rejected([&] { serialize_config(invalid); }, "output_labels[0]");
+        invalid = labeled; invalid.output_labels.front().button = 80;
+        rejected([&] { serialize_config(invalid); }, "output_labels[0].button");
+        invalid = labeled; invalid.output_labels.front().label.clear();
+        rejected([&] { serialize_config(invalid); }, "output_labels[0].label");
+        save_config_file(labeled, path.string());
+        check(load_config_file(path.string()) == labeled, "virtual button labels save to disk");
         auto conflicts = labeled;
         conflicts.bindings.push_back(conflicts.bindings.front());
         auto issues = config_issues(conflicts);
@@ -105,7 +119,7 @@ void run() {
         conflicts.bindings[1].modes = {"missing"};
         issues = config_issues(conflicts);
         check(issues.size() == 1 && issues.front().bindings == std::vector<std::size_t>{1}, "diagnostic location independent of loader message");
-        labeled.input_labels.clear(); save_config_file(labeled, path.string());
+        labeled.input_labels.clear(); labeled.output_labels.clear(); save_config_file(labeled, path.string());
     }
     const auto baseline = contents(path);
     auto edited = load_config_file(path.string());

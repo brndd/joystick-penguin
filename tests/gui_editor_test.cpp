@@ -206,7 +206,13 @@ void newProfileFromGui() {
         named<QLineEdit>(*prompt, "newVirtualName")->setText("virtual");
         check(ok->isEnabled(), "named virtual joystick enables OK");
         check(named<QComboBox>(*prompt, "virtualSourceDevice")->currentIndex() == 0,
-              "virtual joystick can use default ranges without a physical device");
+               "virtual joystick can use default ranges without a physical device");
+        auto* source = named<QComboBox>(*prompt, "virtualSourceDevice");
+        auto* mirror = named<QCheckBox>(*prompt, "mirrorVirtualLabels");
+        check(source->count() == 2 && !mirror->isEnabled(), "configured controller is available as a label source");
+        source->setCurrentIndex(1);
+        check(mirror->isEnabled(), "mirroring can be selected for a configured controller");
+        source->setCurrentIndex(0);
         prompt->accept();
     });
     button(fresh, "Create a virtual device")->click();
@@ -219,6 +225,15 @@ void newProfileFromGui() {
     check(fresh.config().devices.at("virtual").bus == VirtualBus::Virtual, "virtual bus remains selectable");
     bus->setCurrentText("usb");
     check(named<QTableWidget>(fresh, "virtualAxes")->isVisible(), "advanced virtual properties shown without a toggle");
+    check(named<QPushButton>(fresh, "refreshVirtualDevice")->isEnabled(), "virtual joystick offers controller refresh");
+    const auto beforeRefresh = fresh.config();
+    QTimer::singleShot(0, [] {
+        auto* prompt = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+        check(prompt != nullptr, "refresh prompts for a configured physical controller");
+        prompt->accept();
+    });
+    named<QPushButton>(fresh, "refreshVirtualDevice")->click();
+    check(fresh.config() == beforeRefresh, "offline refresh leaves the entire virtual configuration intact");
     named<QSpinBox>(fresh, "vendorId")->setValue(0x1234);
     named<QSpinBox>(fresh, "productId")->setValue(0x5678);
     auto* axes = named<QTableWidget>(fresh, "virtualAxes");
@@ -397,9 +412,38 @@ void offlineButtonChoices() {
     physical.setNumber(255);
     check(physical.number() == 255, "offline dropdown allows the maximum supported indexed button");
     ButtonSelector output(config, ButtonSelector::Target::Virtual);
+    config.output_labels.push_back({"vjoy", 79, "Auxiliary"});
     output.setDevice("vjoy", 79);
     check(output.count() == joystick_button_count && output.number() == 79 &&
-          output.currentText() == "Button 79", "virtual selector uses its own preset without physical labels");
+           output.currentText() == "Auxiliary (Button 79)", "virtual selector uses virtual labels without physical labels");
+}
+
+void virtualCreationMirrorsLabels() {
+    TemporaryDirectory temporary;
+    auto config = load_config_file((std::filesystem::path(EXAMPLES_DIR) / "basic.yaml").string());
+    config.input_labels.push_back({{"physical", ControlKind::Button, -2}, "Trigger"});
+    config.devices.at("physical").path = "/dev/input/by-id/absent-mirror-source";
+    const auto path = temporary.path / "mirroring.yaml";
+    save_config_file(config, path.string());
+    EditorWindow window;
+    window.show();
+    check(window.openProfile(QString::fromStdString(path.string())), "open profile with physical labels for virtual creation");
+    auto* tabs = window.findChild<QTabWidget*>();
+    tabs->setCurrentIndex(1);
+    QTimer::singleShot(0, [] {
+        auto* prompt = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        check(prompt != nullptr, "virtual creation prompt opened for mirroring");
+        named<QLineEdit>(*prompt, "newVirtualName")->setText("mirror");
+        named<QComboBox>(*prompt, "virtualSourceDevice")->setCurrentIndex(1);
+        named<QCheckBox>(*prompt, "mirrorVirtualLabels")->setChecked(true);
+        prompt->accept();
+    });
+    toolButton(*tabs->widget(1), "Add virtual joystick")->click();
+    QApplication::processEvents();
+    check(window.config().output_labels == std::vector<OutputLabel>{{"mirror", 2, "Trigger"}} &&
+          window.config().devices.at("mirror").axes == joystick_axes(),
+          "creation mirrors saved labels even when the configured source is offline");
+    validate_edited_config(window.config());
 }
 
 void multiControllerBrowsing() {
@@ -452,7 +496,21 @@ void multiControllerBrowsing() {
     auto* button2 = root("other-vjoy")->child(0)->child(1);
     tree->setCurrentItem(button2);
     check(table->model()->rowCount() == 2 && button2->text(1) == "2",
-          "virtual button selects immediate and Hold output mappings");
+           "virtual button selects immediate and Hold output mappings");
+    button2->setText(0, "Flight trigger");
+    QApplication::processEvents();
+    check(window.config().output_labels == std::vector<OutputLabel>{{"other-vjoy", 2, "Flight trigger"}} &&
+          table->model()->rowCount() == 2, "inline virtual label preserves output filtering");
+    check(table->model()->index(0, 4).data().toString().contains("Flight trigger"),
+          "output summaries use virtual labels");
+    action_named(window, "&Undo")->trigger();
+    check(window.config().output_labels.empty(), "virtual label edit is undoable");
+    action_named(window, "&Redo")->trigger();
+    check(window.config().output_labels.size() == 1, "virtual label edit is redoable");
+    button2 = root("other-vjoy")->child(0)->child(1);
+    button2->setText(0, "Button 2");
+    QApplication::processEvents();
+    check(window.config().output_labels.empty(), "clearing virtual label retains its button identity");
     QLineEdit* controlSearch = nullptr;
     for (auto* line : window.findChildren<QLineEdit*>())
         if (line->placeholderText() == "Find control…") controlSearch = line;
@@ -786,6 +844,7 @@ void deviceRemovalFromGui() {
 
 void run() {
     offlineButtonChoices();
+    virtualCreationMirrorsLabels();
     multiControllerBrowsing();
     { EditorWindow defaultWindow; check(defaultWindow.size() == QSize(1600, 900), "initial window is 1600x900"); }
     overhaul();

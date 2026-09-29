@@ -8,6 +8,7 @@
 #include "condition_forms.hpp"
 #include "joystick_penguin/joystick_preset.hpp"
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QAbstractButton>
@@ -241,7 +242,7 @@ void SetupWorkspace::showUsage(const std::string& key, bool modifier, int scroll
         table->setItem(row, 1, new QTableWidgetItem(labeledInput(config_, binding.input)));
         table->setItem(row, 2, new QTableWidgetItem(joined(binding.modes)));
         table->setItem(row, 3, new QTableWidgetItem(joined(binding.modifiers)));
-        table->setItem(row, 4, new QTableWidgetItem(mapping_ui::actionSummary(binding)));
+        table->setItem(row, 4, new QTableWidgetItem(mapping_ui::actionSummary(config_, binding)));
     }
     table->resizeColumnsToContents();
     connect(table, &QTableWidget::cellClicked, this, [this, table](int row) {
@@ -275,6 +276,9 @@ void SetupWorkspace::setStartupMode(const QString& key) {
 void SetupWorkspace::add(int kind) {
     bool ok = false;
     std::map<int, AxisRange> copiedAxes;
+    std::string sourceName;
+    bool mirrorLabels = false;
+    QString sourceIssue;
     QString enteredName;
     if (devices_ && kind == 1) {
         QDialog dialog(this);
@@ -286,12 +290,18 @@ void SetupWorkspace::add(int kind) {
         form->addRow("Profile name", name);
         auto* source = new QComboBox(&dialog);
         source->setObjectName("virtualSourceDevice");
-        source->addItem("None (use defaults)");
-        const auto detected = profile_setup::discover_devices();
-        for (int i = 0; i < static_cast<int>(detected.size()); ++i)
-            if (detected[i].issue.empty())
-                source->addItem(qs(detected[i].name) + " · " + qs(detected[i].path), i);
+        source->addItem("None (use defaults)", QString{});
+        for (const auto& [key, device] : config_.devices)
+            if (device.kind == DeviceKind::Evdev) source->addItem(qs(key) + " · " + qs(device.path), qs(key));
         form->addRow("Base on controller", source);
+        auto* mirror = new QCheckBox("Mirror button labels", &dialog);
+        mirror->setObjectName("mirrorVirtualLabels");
+        mirror->setEnabled(false);
+        form->addRow(mirror);
+        connect(source, &QComboBox::currentIndexChanged, &dialog, [source, mirror] {
+            mirror->setEnabled(source->currentIndex() > 0);
+            if (!mirror->isEnabled()) mirror->setChecked(false);
+        });
         layout->addLayout(form);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
         layout->addWidget(buttons);
@@ -305,7 +315,13 @@ void SetupWorkspace::add(int kind) {
         if (dialog.exec() == QDialog::Accepted) {
             ok = true;
             enteredName = name->text().trimmed();
-            if (source->currentIndex() > 0) copiedAxes = detected.at(source->currentData().toInt()).axis_ranges;
+            sourceName = source->currentData().toString().toStdString();
+            mirrorLabels = mirror->isChecked();
+            if (!sourceName.empty()) {
+                const auto detected = profile_setup::inspect_device(config_.devices.at(sourceName).path);
+                if (detected.issue.empty()) copiedAxes = detected.axis_ranges;
+                else sourceIssue = "Could not read controller axes (using preset defaults): " + qs(detected.issue);
+            }
         }
     } else {
         QInputDialog dialog(this);
@@ -331,6 +347,7 @@ void SetupWorkspace::add(int kind) {
             for (const auto& [code, range] : copiedAxes) device.axes.insert_or_assign(code, range);
         }
         next.devices.emplace(name, device);
+        if (mirrorLabels) profile_setup::mirror_button_labels(next, sourceName, name);
     } else if (!kind) {
         if (std::find(next.modes.begin(), next.modes.end(), name) != next.modes.end()) { if (error) error("That mode already exists."); return; }
         next.modes.push_back(name);
@@ -341,6 +358,7 @@ void SetupWorkspace::add(int kind) {
         next.modifiers.emplace(name, std::vector<Control>{{physical->first, ControlKind::Button, -1}});
     }
     if (!commit(std::move(next), false)) return;
+    if (!sourceIssue.isEmpty() && error) error(sourceIssue);
     refresh();
     for (int i = 0; i < list_->count(); ++i)
         if (list_->item(i)->data(Qt::UserRole).toString() == qs(name) && (list_->item(i)->flags() & Qt::ItemIsSelectable)) {

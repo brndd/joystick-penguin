@@ -119,6 +119,13 @@ single undo step.
   device identity reported to applications (**virtual** or **USB**), not how
   events are delivered. The joystick preset includes 79 buttons, four
   hats, and axes 0–7; extra axes may be added and preset ranges reset.
+  When creating a virtual joystick, choose a configured controller to copy
+  readable axis ranges and optionally mirror its indexed button labels (1–79).
+  An offline source still supplies its saved labels and uses preset axis ranges.
+  **Refresh from controller…** on an existing virtual joystick updates matching
+  axis ranges and replaces its preset button labels from a readable configured
+  controller, retaining virtual-only axes. Changed axis ranges require a
+  remapper restart.
 - **Modes & modifiers:** edit persistent modes and named held buttons, with a
   table of their mappings; click a row to jump to that mapping. Use the star
   beside a mode to set the **default mode** (the initial mode when remapping
@@ -176,6 +183,21 @@ Removing a mapping retains its label; clearing the label removes the metadata.
 Renaming a device updates label references, and removing an unused device removes
 its labels. Old profiles load with no labels; the serializer omits `input_labels`
 when empty. The profile version remains 1.
+
+Virtual preset buttons can also be labeled by double-clicking their names in
+the Mappings browser. Labels appear in output choices, summaries, and search;
+the button numbers and emitted events do not change. They are stored separately
+from physical input labels:
+
+```yaml
+output_labels:
+  - {device: virtual, button: 1, label: Trigger}
+```
+
+Each virtual device/button pair has at most one label. Renaming or removing a
+virtual device updates or removes its labels. Mirroring and refresh replace
+labels for that virtual device's preset button slots; labels on other virtual
+devices are unaffected.
 
 Saving rewrites YAML according to the policy above. Confirm a saved profile with
 `./build/joystick-penguin --check profile.yaml`.

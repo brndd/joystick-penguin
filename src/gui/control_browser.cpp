@@ -42,6 +42,14 @@ QString labeledInput(const Config& config, const Control& input) {
     return inputName(input);
 }
 
+QString labeledOutputButton(const Config& config, const std::string& device, int number) {
+    const QString identity = QString("Button %1").arg(number);
+    for (const auto& label : config.output_labels)
+        if (label.device == device && label.button == number)
+            return QString::fromStdString(label.label) + " (" + identity + ")";
+    return identity;
+}
+
 namespace {
 namespace fs = std::filesystem;
 
@@ -233,9 +241,13 @@ ControlBrowser::ControlBrowser(const Config& config, QWidget* parent) : QWidget(
         auto& s = *s_;
         if (s.rebuilding || column != 0 || !item->data(0, Qt::UserRole).isValid()) return;
         const Control input = s.controls[item->data(0, Qt::UserRole).toInt()];
-        if (s.config.devices.at(input.device).kind != DeviceKind::Evdev) return;
+        const bool physical = s.config.devices.at(input.device).kind == DeviceKind::Evdev;
+        if (!physical && input.kind != ControlKind::Button) return;
         QString text = item->text(0).trimmed();
-        if (text == inputName(input)) text.clear();
+        QString identity = inputName(input);
+        if (!physical) for (int n = 1; n <= joystick_button_count; ++n)
+            if (joystick_button_code(n) == input.code) identity = QString("Button %1").arg(n);
+        if (text == identity) text.clear();
         if (labelChanged) labelChanged(input, text);
     });
     connect(s.tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item, int column) {
@@ -512,13 +524,18 @@ void ControlBrowser::rebuild() {
         for (int g = 0; g < 3; ++g)
             groups[g] = new QTreeWidgetItem(root, {QStringList{"Buttons", "Hats", "Axes"}[g]});
         for (const auto& control : controls) {
-            const QString identity = physical ? labeledInput(s.config, control) : inputName(control);
+            QString identity = inputName(control);
             QString title = identity;
             if (physical) for (const auto& label : s.config.input_labels)
                 if (label.input == control) title = QString::fromStdString(label.label);
             if (!physical && control.kind == ControlKind::Button) {
                 for (int n = 1; n <= joystick_button_count; ++n)
-                    if (joystick_button_code(n) == control.code) title = QString("Button %1").arg(n);
+                    if (joystick_button_code(n) == control.code) {
+                        identity = QString("Button %1").arg(n);
+                        title = identity;
+                        for (const auto& label : s.config.output_labels)
+                            if (label.device == name && label.button == n) title = QString::fromStdString(label.label);
+                    }
             }
             if (!(title + " " + identity).contains(s.search->text(), Qt::CaseInsensitive)) continue;
             int count = std::count_if(s.config.bindings.begin(), s.config.bindings.end(), [&](const Binding& binding) {
@@ -537,9 +554,11 @@ void ControlBrowser::rebuild() {
             auto* item = new QTreeWidgetItem(groups[static_cast<int>(control.kind)], {title, usage, "○"});
             item->setData(0, Qt::UserRole, index);
             item->setToolTip(0, identity + QString(" · code %1").arg(control.code) +
-                                    (physical ? " — click twice to edit the label" : ""));
+                                    ((physical || (control.kind == ControlKind::Button && identity.startsWith("Button ")))
+                                        ? " — click twice to edit the label" : ""));
             item->setToolTip(2, "Offline");
-            if (physical) item->setFlags(item->flags() | Qt::ItemIsEditable);
+            if (physical || (!physical && control.kind == ControlKind::Button && identity.startsWith("Button ")))
+                item->setFlags(item->flags() | Qt::ItemIsEditable);
             if (allSelected || std::find(selected.begin(), selected.end(), control) != selected.end()) item->setSelected(true);
             if (previous && *previous == control) s.tree->setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
         }
@@ -575,14 +594,16 @@ void ControlBrowser::displayActivity() {
     for (const auto& [name, monitor] : s.monitors) {
         if (monitor->status == "Monitoring") ++online;
         if (monitor->status == "Disconnected") disconnected = true;
-        issues << QString::fromStdString(name) + ": " + monitor->issue;
+        issues << QString("<div style='color: %1'>%2: %3</div>")
+            .arg(monitor->status == "Monitoring" ? "#2e7d32" : "#ef6c00",
+                 QString::fromStdString(name).toHtmlEscaped(), monitor->issue.toHtmlEscaped());
     }
     s.monitor->setText(s.monitors.empty() ? "No device" : s.monitors.size() == 1 ?
         s.monitors.begin()->second->status :
         QString("%1 %2/%3").arg(online ? "Monitoring" : disconnected ? "Disconnected" : "Offline")
             .arg(online).arg(s.monitors.size()));
-    s.monitor->setToolTip(issues.join("\n"));
-    s.monitor->setStyleSheet(online == static_cast<int>(s.monitors.size()) && online ? "color: #2e7d32;" : "color: #b00020;");
+    s.monitor->setToolTip("<html><body>" + issues.join(QString{}) + "</body></html>");
+    s.monitor->setStyleSheet(online == static_cast<int>(s.monitors.size()) && online ? "color: #2e7d32;" : "color: #ef6c00;");
     for (auto* item : s.tree->findItems("*", Qt::MatchWildcard | Qt::MatchRecursive)) {
         if (!item->data(0, Qt::UserRole).isValid()) continue;
         const auto& input = s.controls[item->data(0, Qt::UserRole).toInt()];

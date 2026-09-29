@@ -17,14 +17,18 @@ QString joined(const std::vector<std::string>& values) {
 }
 }
 
-QString actionName(const Action& action) {
-    return std::visit([](const auto& value) -> QString {
+QString actionName(const Config& config, const Action& action) {
+    return std::visit([&config](const auto& value) -> QString {
         using T = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<T, ModeAction>) return "Switch mode → " + qs(value.mode);
         if constexpr (std::is_same_v<T, ButtonAction>) {
             int index = 0;
             for (int i = 1; i <= joystick_button_count; ++i) if (joystick_button_code(i) == value.code) index = i;
-            return qs(value.device) + (index ? QString(" · button %1").arg(index) : QString(" · EV_KEY %1").arg(value.code));
+            QString title = index ? QString("button %1").arg(index) : QString("EV_KEY %1").arg(value.code);
+            if (index) for (const auto& label : config.output_labels)
+                if (label.device == value.device && label.button == index)
+                    title = qs(label.label) + " (" + title + ")";
+            return qs(value.device) + " · " + title;
         }
         if constexpr (std::is_same_v<T, AxisAction>)
             return qs(value.device) + " · " + inputName({"", ControlKind::AbsoluteAxis, value.code}) + (value.invert ? " (inverted)" : "");
@@ -34,10 +38,10 @@ QString actionName(const Action& action) {
     }, action);
 }
 
-QString actionSummary(const Binding& binding) {
-    auto branch = [](const auto& actions) {
+QString actionSummary(const Config& config, const Binding& binding) {
+    auto branch = [&config](const auto& actions) {
         QStringList names;
-        for (const auto& action : actions) names << actionName(action);
+        for (const auto& action : actions) names << actionName(config, action);
         return names.empty() ? QString("No output") : names.join(" + ");
     };
     if (binding.tap_hold)
@@ -64,7 +68,7 @@ QVariant BindingModel::data(const QModelIndex& index, int role) const {
     case 1: return labeledInput(config_, binding.input);
     case 2: return joined(binding.modes);
     case 3: return joined(binding.modifiers);
-    case 4: return actionSummary(binding);
+    case 4: return actionSummary(config_, binding);
     default: return {};
     }
 }

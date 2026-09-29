@@ -110,8 +110,16 @@ MappingWorkspace::MappingWorkspace(ProfileDocument& document, QWidget* parent)
         const auto selectedIndex = table_->currentIndex();
         const int selectedRow = selectedIndex.isValid() ? proxy_->mapToSource(selectedIndex).row() : -1;
         if (!document_.editLabels([&](Config& config) {
-            std::erase_if(config.input_labels, [&](const auto& entry) { return entry.input == input; });
-            if (!label.isEmpty()) config.input_labels.push_back({input, str(label)});
+            if (config.devices.at(input.device).kind == DeviceKind::Evdev) {
+                std::erase_if(config.input_labels, [&](const auto& entry) { return entry.input == input; });
+                if (!label.isEmpty()) config.input_labels.push_back({input, str(label)});
+            } else {
+                for (int n = 1; n <= joystick_button_count; ++n) if (joystick_button_code(n) == input.code) {
+                    std::erase_if(config.output_labels, [&](const auto& entry) { return entry.device == input.device && entry.button == n; });
+                    if (!label.isEmpty()) config.output_labels.push_back({input.device, n, str(label)});
+                    break;
+                }
+            }
         })) return;
         detail_->refresh();
         refreshBinding();

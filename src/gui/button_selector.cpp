@@ -45,7 +45,7 @@ void ButtonSelector::setDevice(const std::string& name, int number, bool preserv
     clear();
     if (target_ == Target::Virtual) {
         for (int i = 1; i <= joystick_button_count; ++i)
-            addItem(QString("Button %1").arg(i), i);
+            addItem(labeledOutputButton(config_, name, i), i);
     } else {
         auto found = config_.devices.find(name);
         std::optional<std::vector<int>> codes;

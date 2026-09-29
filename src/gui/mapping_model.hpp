@@ -4,8 +4,8 @@
 #include <QSortFilterProxyModel>
 
 namespace mapping_ui {
-QString actionName(const joystick_penguin::Action& action);
-QString actionSummary(const joystick_penguin::Binding& binding);
+QString actionName(const joystick_penguin::Config& config, const joystick_penguin::Action& action);
+QString actionSummary(const joystick_penguin::Config& config, const joystick_penguin::Binding& binding);
 
 class BindingModel : public QAbstractTableModel {
 public:
