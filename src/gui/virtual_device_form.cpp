@@ -1,6 +1,7 @@
 #include "virtual_device_form.hpp"
 #include "setup_model.hpp"
 #include "discovery.hpp"
+#include "control_browser.hpp"
 #include "joystick_penguin/joystick_preset.hpp"
 
 #include <QComboBox>
@@ -126,12 +127,13 @@ void VirtualDeviceForm::buildAxisTable(QFormLayout* extra, QWidget* advancedFiel
     axes_->setObjectName("virtualAxes");
     axes_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     axes_->setColumnCount(5);
-    axes_->setHorizontalHeaderLabels({"EV_ABS", "Resolution", "Neutral", "Min / max / neutral", "Advanced mode"});
+    axes_->setHorizontalHeaderLabels({"Axis", "Resolution", "Neutral", "Min / max / neutral", "Advanced mode"});
     axes_->verticalHeader()->hide();
     auto append = [this](int code, AxisRange range) {
         const int row = axes_->rowCount();
         axes_->insertRow(row);
-        auto* item = new QTableWidgetItem(QString::number(code));
+        auto* item = new QTableWidgetItem(inputName({"", ControlKind::AbsoluteAxis, code}) + QString(" · EV_ABS %1").arg(code));
+        item->setData(Qt::UserRole, code);
         item->setFlags(item->flags() & ~Qt::ItemIsEditable);
         axes_->setItem(row, 0, item);
         const auto settings = axis_resolution_settings(range);
@@ -173,7 +175,7 @@ void VirtualDeviceForm::buildAxisTable(QFormLayout* extra, QWidget* advancedFiel
         const int code = QInputDialog::getInt(this, "Add axis", "EV_ABS code (excluding hats 16–23)", 8, 0, ABS_MAX, 1, &ok);
         if (!ok || (code >= ABS_HAT0X && code <= ABS_HAT3Y)) return;
         for (int row = 0; row < axes_->rowCount(); ++row)
-            if (axes_->item(row, 0)->text().toInt() == code) return;
+            if (axes_->item(row, 0)->data(Qt::UserRole).toInt() == code) return;
         auto next = proposed();
         next.devices.at(key_).axes[code] = axis_resolution(12, false);
         if (commit_(std::move(next), true, {})) setEnabled(false);
@@ -181,7 +183,7 @@ void VirtualDeviceForm::buildAxisTable(QFormLayout* extra, QWidget* advancedFiel
     connect(removeAxis, &QPushButton::clicked, this, [this] {
         const int row = axes_->currentRow();
         if (row < 0) return;
-        const int code = axes_->item(row, 0)->text().toInt();
+        const int code = axes_->item(row, 0)->data(Qt::UserRole).toInt();
         auto next = proposed();
         try { profile_setup::remove_axis(next, key_, code); }
         catch (const ConfigError& failure) { if (error_) error_(qs(failure.what())); return; }
@@ -228,7 +230,7 @@ Config VirtualDeviceForm::proposed() const {
     device.product_id = product_->value();
     device.axes.clear();
     for (int row = 0; row < axes_->rowCount(); ++row)
-        device.axes[axes_->item(row, 0)->text().toInt()] = axisRowRange(row);
+        device.axes[axes_->item(row, 0)->data(Qt::UserRole).toInt()] = axisRowRange(row);
     return next;
 }
 

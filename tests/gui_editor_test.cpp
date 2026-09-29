@@ -237,6 +237,10 @@ void newProfileFromGui() {
     named<QSpinBox>(fresh, "vendorId")->setValue(0x1234);
     named<QSpinBox>(fresh, "productId")->setValue(0x5678);
     auto* axes = named<QTableWidget>(fresh, "virtualAxes");
+    check(axes->item(0, 0)->text() == "X · EV_ABS 0" &&
+          axes->item(1, 0)->text() == "Y · EV_ABS 1" &&
+          axes->item(5, 0)->text() == "RZ · EV_ABS 5",
+          "axis ranges show names alongside EV_ABS codes");
     check(axes->width() < fresh.width(), "axis table does not stretch across virtual device properties");
     toolButton(fresh, "About virtual bus identity")->click();
     check(QToolTip::text().contains("Virtual or USB"), "bus help is concise");
