@@ -541,6 +541,45 @@ void multiControllerBrowsing() {
     check(table->model()->rowCount() == 1, "clicking a physical controller selects its inputs");
 }
 
+void existingActionSelection() {
+    TemporaryDirectory temporary;
+    auto config = load_config_file((std::filesystem::path(EXAMPLES_DIR) / "basic.yaml").string());
+    config.devices.at("physical").path = "/dev/input/by-id/absent-action-selection";
+    config.bindings.push_back({{"physical", ControlKind::AbsoluteAxis, ABS_X}, {"default"}, {},
+                               {AxisAction{"virtual", ABS_RY, true}}, std::nullopt});
+    config.bindings.push_back({{"physical", ControlKind::HatDirection, ABS_HAT0X, -1}, {"default"}, {},
+                               {HatAction{"virtual", ABS_HAT0Y, 1}}, std::nullopt});
+    const auto path = temporary.path / "actions.yaml";
+    save_config_file(config, path.string());
+    EditorWindow window;
+    window.show();
+    check(window.openProfile(QString::fromStdString(path.string())), "open action selection profile");
+    selectAllControls(window);
+    auto* bindings = named<QTableView>(window, "bindingTable");
+    auto* actions = named<QTableWidget>(window, "actionList");
+    auto select = [&](int row) {
+        bindings->setCurrentIndex(bindings->model()->index(row, 0));
+        QApplication::processEvents();
+    };
+    select(2);
+    check(actions->currentRow() == 0, "selecting an axis binding selects its first action");
+    auto* axisEditor = named<QGroupBox>(window, "inlineActionEditor");
+    check(named<QComboBox>(*axisEditor, "actionType")->currentData().toInt() == 2 &&
+          named<QComboBox>(*axisEditor, "actionOutputAxis")->currentData().toInt() == ABS_RY &&
+          named<QCheckBox>(*axisEditor, "actionInvert")->isChecked(),
+          "existing axis action initializes its type, declared output axis and inversion");
+    select(3);
+    check(actions->currentRow() == 0, "selecting a hat binding selects its first action");
+    auto* hatEditor = named<QGroupBox>(window, "inlineActionEditor");
+    check(named<QComboBox>(*hatEditor, "actionType")->currentData().toInt() == 1 &&
+          named<QSpinBox>(*hatEditor, "actionAxis")->value() == ABS_HAT0Y,
+          "existing hat action initializes its type and component");
+    select(0);
+    check(actions->currentRow() == 0 && named<QGroupBox>(window, "inlineActionEditor"),
+          "selecting a button binding opens its first action");
+    check(window.config() == config, "browsing existing actions leaves the profile unchanged");
+}
+
 void overhaul() {
     EditorWindow window;
     window.resize(1024, 768);
@@ -754,10 +793,15 @@ void overhaul() {
     QApplication::sendEvent(originalRow, &selectRow);
     check(actionList->currentRow() == 0 && named<QGroupBox>(window, "inlineActionEditor")->isVisible(),
           "single click on action row selects its editor");
-    toolButton(window, QString("Move action %1 up").arg(originalActions + 1))->click();
+    int addedRow = -1;
+    for (int row = 0; row < actionList->rowCount(); ++row)
+        if (actionText(actionList->item(row, 0)).contains("button 3")) addedRow = row;
+    check(addedRow >= 0, "new action is present before moving");
+    const int offset = addedRow ? -1 : 1;
+    toolButton(window, QString("Move action %1 %2").arg(addedRow + 1).arg(offset < 0 ? "up" : "down"))->click();
     QApplication::processEvents();
-    check(actionText(actionList->item(originalActions - 1, 0)).contains("button 3"), "row arrow reorders actions");
-    toolButton(window, QString("Remove action %1").arg(originalActions))->click();
+    check(actionText(actionList->item(addedRow + offset, 0)).contains("button 3"), "row arrow reorders actions");
+    toolButton(window, QString("Remove action %1").arg(addedRow + 1))->click();
     QApplication::processEvents();
     check(actionList->rowCount() == originalActions, "row trash button removes the chosen action");
     if (!qEnvironmentVariable("JP_GUI_SCREENSHOT").isEmpty())
@@ -846,6 +890,7 @@ void run() {
     offlineButtonChoices();
     virtualCreationMirrorsLabels();
     multiControllerBrowsing();
+    existingActionSelection();
     { EditorWindow defaultWindow; check(defaultWindow.size() == QSize(1600, 900), "initial window is 1600x900"); }
     overhaul();
     newProfileFromGui();

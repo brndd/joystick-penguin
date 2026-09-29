@@ -93,9 +93,14 @@ void ActionList::clearSelection() {
 }
 
 void ActionList::selectBinding(int row) {
-    if (binding_ != row) clearSelection();
+    const bool changed = binding_ != row;
+    if (changed) clearSelection();
     binding_ = row;
     refresh();
+    if (changed && table_->rowCount() > 0) {
+        table_->setCurrentCell(0, 0);
+        openEditor(0);
+    }
 }
 
 std::optional<ActionList::Location> ActionList::location(int row) const {

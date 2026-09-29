@@ -85,6 +85,7 @@ ActionEditor::ActionEditor(const Config& config, ControlKind input, Action origi
     direction_->addItem("Positive (+1)", 1);
     form->addRow("Hat direction", direction_);
     invert_ = new QCheckBox("Invert output axis", this);
+    invert_->setObjectName("actionInvert");
     form->addRow(invert_);
     mode_ = new QComboBox(this);
     mode_->setObjectName("actionMode");
@@ -102,6 +103,14 @@ ActionEditor::ActionEditor(const Config& config, ControlKind input, Action origi
     connect(direction_, &QComboBox::currentIndexChanged, this, [this] { notifyChanged(); });
     connect(invert_, &QCheckBox::toggled, this, [this] { notifyChanged(); });
     connect(mode_, &QComboBox::currentIndexChanged, this, [this] { notifyChanged(); });
+    const int originalType = std::visit([](const auto& value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, ButtonAction>) return 0;
+        if constexpr (std::is_same_v<T, HatAction>) return 1;
+        if constexpr (std::is_same_v<T, AxisAction>) return 2;
+        return 3;
+    }, original);
+    type_->setCurrentIndex(type_->findData(originalType));
     std::visit([&](const auto& value) {
         using T = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<T, ModeAction>) {
@@ -118,6 +127,7 @@ ActionEditor::ActionEditor(const Config& config, ControlKind input, Action origi
                 axis_->setValue(value.code);
                 direction_->setCurrentIndex(value.direction < 0 ? 0 : 1);
             } else {
+                updateAxes();
                 outputAxis_->setCurrentIndex(outputAxis_->findData(value.code));
                 invert_->setChecked(value.invert);
             }
