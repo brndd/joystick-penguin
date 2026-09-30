@@ -231,7 +231,7 @@ MappingWorkspace::MappingWorkspace(ProfileDocument& document, QWidget* parent)
             if (target.isValid()) table_->setCurrentIndex(target);
         }
     });
-    refreshFilters(); selectBinding(-1); updateRightView();
+    selectBinding(-1); refreshFilters(); updateRightView();
 }
 
 MappingWorkspace::~MappingWorkspace() {
@@ -312,7 +312,7 @@ void MappingWorkspace::resetBrowsing(bool resetKind) {
     proxy_->inputFilter = true; proxy_->inputs.clear();
     search_->clear();
     if (resetKind) kindFilter_->setCurrentIndex(0);
-    controls_->resetBrowsing(); refreshFilters(); selectBinding(-1);
+    selectBinding(-1); controls_->resetBrowsing(); refreshFilters();
     if (resetKind && model_->rowCount()) table_->setCurrentIndex(proxy_->index(0, 0));
 }
 

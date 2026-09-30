@@ -558,9 +558,12 @@ void existingActionSelection() {
     EditorWindow window;
     window.show();
     check(window.openProfile(QString::fromStdString(path.string())), "open action selection profile");
-    selectAllControls(window);
     auto* bindings = named<QTableView>(window, "bindingTable");
     auto* actions = named<QTableWidget>(window, "actionList");
+    check(bindings->currentIndex().row() == 0 && actions->rowCount() == 1 &&
+          actionText(actions->item(0, 0)).contains("button 2"),
+          "opening a profile shows the first binding's actions without manual selection");
+    selectAllControls(window);
     auto select = [&](int row) {
         bindings->setCurrentIndex(bindings->model()->index(row, 0));
         QApplication::processEvents();
