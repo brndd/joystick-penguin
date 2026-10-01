@@ -165,7 +165,9 @@ transitions such as `Mode changed: default -> alternate` when they occur.
 one-based button numbers. The physical numbers resolve against each VKB's
 actual EV_KEY capabilities; the virtual outputs use our 79-button joystick
 preset. Joyful's momentary Modifier mode is the held left-button-5 layer over
-the three persistent modes. The profile retains the USB bus, device names,
+the SCM and Nav persistent modes. The left A2 hold bindings toggle between SCM
+and Nav. Auxiliary Mode and the right A2 hold actions are removed.
+The profile retains the USB bus, device names,
 vendor and product IDs, but its virtual button ordinal layout is deliberately
 not identical to Joyful's. The source Joyful profile had already omitted Gremlin mouse
 acceleration and two macros; those omissions remain.
