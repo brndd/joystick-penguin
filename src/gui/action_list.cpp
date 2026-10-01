@@ -41,7 +41,7 @@ ActionList::ActionList(ProfileDocument& document, QWidget* parent) : QWidget(par
 
     // Combined Immediate or Tap/Hold rows, with controls scoped to each row.
     auto* listPane = new QWidget(split);
-    listPane->setMinimumWidth(180);
+    listPane->setMinimumWidth(400);
     auto* listLayout = new QVBoxLayout(listPane);
     listLayout->setContentsMargins(0, 0, 0, 0);
     table_ = new QTableWidget(listPane);
